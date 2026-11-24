@@ -290,10 +290,16 @@ export function permissionOverwrites(
   const everyone = everyoneRole ? [{ role: everyoneRole, allow: everyoneAllowForChannelType(channelType), deny: 0n }] : []
 
   // Staff HQ: staff roles only; everyone denied view.
+  // Voice permissions (CONNECT/SPEAK) are only valid on voice/stage channels —
+  // applying them to text channels triggers Discord API error 50024.
   const staffChannelIds = ['ch_staff_room', 'ch_mod_logs', 'ch_bot_logs', 'ch_security_logs', 'ch_news_review', 'ch_live_management']
   if (staffChannelIds.includes(channelId)) {
     const staffEntries: OverwriteEntry[] = []
-    for (const roleId of StaffRoleIds) staffEntries.push(...addEntry(get(roleId), ['VIEW_CHANNEL', 'SEND_MESSAGES', 'READ_MESSAGE_HISTORY', 'CONNECT', 'SPEAK']))
+    const staffPerms =
+      channelType === ChannelType.GuildVoice || channelType === ChannelType.GuildStageVoice
+        ? ['VIEW_CHANNEL', 'SEND_MESSAGES', 'READ_MESSAGE_HISTORY', 'CONNECT', 'SPEAK']
+        : ['VIEW_CHANNEL', 'SEND_MESSAGES', 'READ_MESSAGE_HISTORY']
+    for (const roleId of StaffRoleIds) staffEntries.push(...addEntry(get(roleId), staffPerms))
     staffEntries.push({ role: everyoneRole!, allow: 0n, deny: combine('VIEW_CHANNEL') })
     return staffEntries
   }
