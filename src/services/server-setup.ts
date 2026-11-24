@@ -197,7 +197,7 @@ export async function apply(guild: Guild): Promise<SetupResult> {
     const existing = existingChannels.find(
       (c) => c?.name === def.name && (!def.category || (c?.parentId ?? null) === parentId)
     )
-    const overwrites = permissionOverwrites(def.id, resolvedRoles, everyoneRole)
+    const overwrites = permissionOverwrites(def.id, resolvedRoles, everyoneRole, discordChannelType(def.type))
 
     if (!existing) {
       const created = await guild.channels.create({
@@ -253,8 +253,25 @@ export async function audit(guild: Guild): Promise<SetupPreview> {
 
 type OverwriteEntry = { role: Role; allow: bigint; deny: bigint }
 
-function everyoneAllow(): bigint {
-  return combine('VIEW_CHANNEL', 'SEND_MESSAGES', 'READ_MESSAGE_HISTORY', 'CONNECT', 'SPEAK', 'USE_EXTERNAL_EMOJIS')
+function everyoneTextAllow(): bigint {
+  return combine('VIEW_CHANNEL', 'SEND_MESSAGES', 'READ_MESSAGE_HISTORY', 'USE_EXTERNAL_EMOJIS')
+}
+
+function everyoneVoiceAllow(): bigint {
+  return combine('VIEW_CHANNEL', 'CONNECT', 'SPEAK', 'USE_EXTERNAL_EMOJIS')
+}
+
+/** Default @everyone permissions scoped to a channel type, so voice perms never land on text channels (Discord API error 50024). */
+function everyoneAllowForChannelType(channelType: ChannelType): bigint {
+  switch (channelType) {
+    case ChannelType.GuildCategory:
+      return combine('VIEW_CHANNEL')
+    case ChannelType.GuildVoice:
+    case ChannelType.GuildStageVoice:
+      return everyoneVoiceAllow()
+    default: // GuildText, GuildNews
+      return everyoneTextAllow()
+  }
 }
 
 function addEntry(role: Role | undefined, allow: string[], deny: string[] = []): OverwriteEntry[] {
@@ -266,10 +283,11 @@ function addEntry(role: Role | undefined, allow: string[], deny: string[] = []):
 export function permissionOverwrites(
   channelId: string,
   roles: Map<string, Role>,
-  everyoneRole: Role | null
+  everyoneRole: Role | null,
+  channelType: ChannelType = ChannelType.GuildText
 ): OverwriteEntry[] {
   const get = (id: string) => roles.get(id)
-  const everyone = everyoneRole ? [{ role: everyoneRole, allow: everyoneAllow(), deny: 0n }] : []
+  const everyone = everyoneRole ? [{ role: everyoneRole, allow: everyoneAllowForChannelType(channelType), deny: 0n }] : []
 
   // Staff HQ: staff roles only; everyone denied view.
   const staffChannelIds = ['ch_staff_room', 'ch_mod_logs', 'ch_bot_logs', 'ch_security_logs', 'ch_news_review', 'ch_live_management']
@@ -315,7 +333,7 @@ export function permissionOverwrites(
   }
 
   // Default public channels.
-  return [{ role: everyoneRole!, allow: everyoneAllow(), deny: 0n }]
+  return [{ role: everyoneRole!, allow: everyoneAllowForChannelType(channelType), deny: 0n }]
 }
 
 async function applyOverwrites(channel: any, overwrites: OverwriteEntry[]): Promise<void> {
