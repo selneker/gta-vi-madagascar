@@ -230,9 +230,10 @@ async function handleApprove(
     },
   })
 
-  // Award Verified Streamer role if it exists
+  // Award Verified Streamer role if it exists. Resolve the member over REST:
+  // the GuildMembers intent is not requested, so the member cache is partial.
   const verifiedRole = findChannelByName(guild.roles.cache, 'Verified Streamer')
-  const targetMember = guild.members.cache.get(targetUser.id)
+  const targetMember = await guild.members.fetch(targetUser.id).catch(() => null)
   if (verifiedRole && targetMember) {
     try {
       await targetMember.roles.add(verifiedRole, 'Streamer application approved')

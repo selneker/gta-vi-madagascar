@@ -16,12 +16,14 @@ export class GtaMadagascarBot {
   private readonly modals = new Map<string, (interaction: ModalSubmitInteraction, deps: BotDeps) => Promise<void>>()
 
   constructor() {
+    // Slash commands, modals and voice-state events only. The privileged
+    // GuildMembers / MessageContent intents are intentionally NOT requested:
+    // they must be enabled in the Discord Developer Portal and the bot has no
+    // message listeners, so requesting them only causes a 4014 at login.
     this.client = new Client({
       intents: [
         GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMembers,
         GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
         GatewayIntentBits.GuildVoiceStates,
         GatewayIntentBits.GuildScheduledEvents,
       ],
