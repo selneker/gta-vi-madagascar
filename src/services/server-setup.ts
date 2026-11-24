@@ -6,6 +6,8 @@ import {
   VoiceChannel,
   StageChannel,
   NewsChannel,
+  Collection,
+  NonThreadGuildBasedChannel,
   ChannelType,
   ColorResolvable,
   PermissionResolvable,
@@ -288,11 +290,93 @@ export async function apply(guild: Guild): Promise<SetupResult> {
     try { await existing.setPosition(def.position ?? 0, { reason: 'GTA VI MADAGASCAR /setup apply' }) } catch { /* */ }
   }
 
+  // --- Nettoyage des doublons : supprime les canaux qui partagent le même
+  // "nom de base" (préfixe de style ╭ㆍ│ㆍ╰ㆍ retiré) dans une même catégorie,
+  // en gardant celui qui correspond exactement à un def de config (ou le premier).
+  const cleanupResult = await cleanupDuplicateChannels(guild, existingChannels)
+  if (cleanupResult.removed > 0) {
+    warnings.push(`${cleanupResult.removed} doublon(s) de salon supprimé(s). Vérifiez le serveur.`)
+    logger.info({ removed: cleanupResult.removed, kept: cleanupResult.kept, guild: guild.id }, 'Duplicate channels cleaned')
+  }
+
   return {
     applied: { roles: rolesCreated + rolesUpdated, channels: channelsCreated + channelsUpdated },
     skipped: { roles: Roles.length - rolesCreated - rolesUpdated, channels: Channels.length - channelsCreated - channelsUpdated },
     warnings,
   }
+}
+
+/** Extrait le nom de base d'un salon (préfixe de style ╭ㆍ│ㆍ╰ㆍ retiré). */
+function stripStylePrefix(name: string): string {
+  return name.replace(/^[╭│╰]ㆍ\s*/, '')
+}
+
+/**
+ * Supprime les canaux en doublon dans chaque catégorie.
+ * Deux canaux sont des doublons s'ils ont le même nom de base et la même catégorie.
+ * On garde celui qui correspond exactement à un ChannelDef, sinon le premier trouvé.
+ */
+export async function cleanupDuplicateChannels(
+  guild: Guild,
+  existingChannels: Collection<string, NonThreadGuildBasedChannel | null>,
+): Promise<{ removed: number; kept: number }> {
+  const channelsByCategory = new Map<string | null, NonThreadGuildBasedChannel[]>()
+  for (const [, channel] of existingChannels) {
+    if (!channel) continue
+    const catId = channel.parentId ?? null
+    if (!channelsByCategory.has(catId)) channelsByCategory.set(catId, [])
+    channelsByCategory.get(catId)!.push(channel)
+  }
+
+  let removed = 0
+  let kept = 0
+
+  for (const [catId, group] of channelsByCategory) {
+    const byBaseName = new Map<string, NonThreadGuildBasedChannel[]>()
+    for (const channel of group) {
+      const base = stripStylePrefix(channel.name)
+      if (!byBaseName.has(base)) byBaseName.set(base, [])
+      byBaseName.get(base)!.push(channel)
+    }
+
+    for (const [base, duplicates] of byBaseName) {
+      if (duplicates.length <= 1) {
+        kept += duplicates.length
+        continue
+      }
+
+      // Cherche un def de config qui correspond exactement à ce nom de base dans cette catégorie
+      const def = Channels.find(
+        (c) => c.category === (catId ? categoryById(catId)?.id : undefined) && stripStylePrefix(c.name) === base,
+      )
+      const exactMatch = def ? duplicates.find((c) => c.name === def.name) : undefined
+      const keeper = exactMatch ?? duplicates[0]
+
+      for (const channel of duplicates) {
+        if (channel.id === keeper.id) continue
+        if (channel.type === ChannelType.GuildCategory) continue
+        try {
+          await channel.delete('Doublon supprimé — /setup cleanup')
+          removed++
+          logger.info({ channel: channel.id, name: channel.name, guild: guild.id }, 'Duplicate channel deleted')
+        } catch (error) {
+          logger.error({ channel: channel.id, name: channel.name, error: String(error) }, 'Failed to delete duplicate channel')
+        }
+      }
+      kept++
+    }
+  }
+
+  return { removed, kept }
+}
+
+/**
+ * Supprime les canaux en doublon dans chaque catégorie (appel autonome pour /setup cleanup).
+ * Retourne le nombre de canaux supprimés et conservés.
+ */
+export async function cleanup(guild: Guild): Promise<{ removed: number; kept: number }> {
+  const existingChannels = await guild.channels.fetch()
+  return cleanupDuplicateChannels(guild, existingChannels)
 }
 
 /** Read-only audit report. */
