@@ -344,7 +344,20 @@ export function permissionOverwrites(
 
 async function applyOverwrites(channel: any, overwrites: OverwriteEntry[]): Promise<void> {
   for (const { role, allow, deny } of overwrites) {
-    await channel.permissionOverwrites.edit(role, { allow, deny }, { reason: 'GTA VI MADAGASCAR /setup apply' })
+    try {
+      await channel.permissionOverwrites.edit(role, { allow, deny }, { reason: 'GTA VI MADAGASCAR /setup apply' })
+    } catch (error) {
+      // Une overwrite sur un type de canal incompatible (ex: permissions voix sur un salon text)
+      // est ignorée pour ne pas faire échouer tout le /setup apply. Le canal reste utilisable
+      // avec ses permissions par défaut.
+      logger.error({
+        channel: channel.id,
+        channelName: channel.name,
+        channelType: channel.type,
+        role: role?.name,
+        error: String(error),
+      }, 'Permission overwrite skipped — incompatible channel type')
+    }
   }
 }
 
