@@ -1,4 +1,5 @@
 import { db } from '../lib/db.js'
+import { Language } from '@prisma/client'
 import { logger } from '../lib/logger.js'
 
 /** Award XP to a member, recording the transaction. Returns the updated profile. */
@@ -32,6 +33,31 @@ export async function getProfile(userId: string, guildId: string) {
     include: { xpTransactions: { orderBy: { createdAt: 'desc' }, take: 5 } },
   })
   if (!profile || profile.guildId !== guildId) return null
+  return profile
+}
+
+/** Update a member's profile (language, platform, bio). Creates it if missing. */
+export async function updateProfile(
+  userId: string,
+  guildId: string,
+  data: { language?: string; platform?: string; bio?: string },
+) {
+  const profile = await db.memberProfile.upsert({
+    where: { userId },
+    create: {
+      userId,
+      guildId,
+      language: (data.language ?? 'FRENCH') as Language,
+      platform: data.platform,
+      bio: data.bio,
+    },
+    update: {
+      language: (data.language as Language) ?? undefined,
+      platform: data.platform,
+      bio: data.bio,
+    },
+  })
+  logger.info({ userId, guildId, data }, 'Profile updated')
   return profile
 }
 

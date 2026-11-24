@@ -10,6 +10,13 @@ import {
   newsEditModalCustomId,
 } from './news.js'
 import { data as communityData, execute as communityExecute } from './community.js'
+import { data as mandyData, execute as mandyExecute } from './mandy.js'
+import {
+  handleWelcomeSurveyButton,
+  handleWelcomeSurveyModal,
+  handleRoleSelect,
+  welcomeSurveyModalCustomId,
+} from './welcome.js'
 
 export interface Command {
   data: { toJSON: () => unknown; name: string }
@@ -21,12 +28,18 @@ export interface ModalHandler {
   handle: (interaction: any, deps: { db: unknown; logger: Logger }) => Promise<void>
 }
 
+export interface ComponentHandler {
+  customId: string
+  handle: (interaction: any, deps: { db: unknown; logger: Logger }) => Promise<void>
+}
+
 export const commands: Command[] = [
   { data: setupData, execute: setupExecute },
   { data: liveData, execute: liveExecute },
   { data: streamerData, execute: streamerExecute },
   { data: newsData, execute: newsExecute },
   { data: communityData, execute: communityExecute },
+  { data: mandyData, execute: mandyExecute },
 ]
 
 export const modalHandlers: ModalHandler[] = [
@@ -34,4 +47,10 @@ export const modalHandlers: ModalHandler[] = [
   { customId: 'streamer:apply', handle: handleStreamerApplyModal },
   { customId: newsSubmitModalCustomId, handle: handleNewsSubmitModal },
   { customId: newsEditModalCustomId, handle: handleNewsSubmitModal },
+  { customId: welcomeSurveyModalCustomId, handle: handleWelcomeSurveyModal },
+]
+
+export const componentHandlers: ComponentHandler[] = [
+  { customId: 'welcome:survey', handle: handleWelcomeSurveyButton },
+  { customId: 'welcome:roles', handle: handleRoleSelect },
 ]
