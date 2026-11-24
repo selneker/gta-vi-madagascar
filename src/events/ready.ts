@@ -1,6 +1,7 @@
 import { Client, Events } from 'discord.js'
 import { logger } from '../lib/logger.js'
 import { db } from '../lib/db.js'
+import { startNewsRSSService } from '../services/news-rss.js'
 
 export function registerReadyEvents(client: Client): void {
   client.on(Events.Debug, (message: string) => logger.debug({ message }))
@@ -9,8 +10,11 @@ export function registerReadyEvents(client: Client): void {
 
   client.on(Events.Warn, (warning: string) => logger.warn({ warning }, 'Discord client warning'))
 
-  client.on(Events.ClientReady, (c) => {
+  client.on(Events.ClientReady, async (c) => {
     logger.info({ user: c.user.tag, id: c.user.id, guilds: c.guilds.cache.size }, 'Bot connecté / Bot ready')
+
+    // Démarre le service de polling RSS en arrière-plan
+    startNewsRSSService()
   })
 
   client.on(Events.GuildCreate, async (guild) => {
