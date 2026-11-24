@@ -38,6 +38,9 @@ const channelNumberById = new Map<string, number>()
 /** channelId => lobby id it belongs to. */
 const channelLobbyById = new Map<string, string>()
 
+/** channelId => guild id it belongs to (used to delete the DB row). */
+const channelGuildById = new Map<string, string>()
+
 /** lobbyId => set of PUBLIC numbers currently in use. */
 const usedNumbersByLobby = new Map<string, Set<number>>()
 
@@ -77,17 +80,34 @@ function takeNumber(lobbyId: string, number: number): void {
   used.add(number)
 }
 
-function releaseTracking(channelId: string): void {
+async function releaseTracking(channelId: string): Promise<void> {
   const lobbyId = channelLobbyById.get(channelId)
   const number = channelNumberById.get(channelId)
+  const guildId = channelGuildById.get(channelId)
   channelLobbyById.delete(channelId)
   channelNumberById.delete(channelId)
-  if (lobbyId === undefined) return
-  const channels = tempChannelsByLobby.get(lobbyId)
-  if (channels) channels.delete(channelId)
-  if (number !== undefined) {
-    const used = usedNumbersByLobby.get(lobbyId)
-    if (used) used.delete(number)
+  channelGuildById.delete(channelId)
+  if (lobbyId !== undefined) {
+    const channels = tempChannelsByLobby.get(lobbyId)
+    if (channels) channels.delete(channelId)
+    if (number !== undefined) {
+      const used = usedNumbersByLobby.get(lobbyId)
+      if (used) used.delete(number)
+    }
+  }
+
+  // Supprime la ligne de base de données associée au salon.
+  if (guildId !== undefined) {
+    try {
+      await db.channelConfiguration.delete({
+        where: { guildId_channelId: { guildId, channelId } },
+      })
+    } catch (error) {
+      logger.error(
+        { error: String(error), channel: channelId, guild: guildId },
+        'Failed to delete public voice channel from database'
+      )
+    }
   }
 }
 
@@ -133,6 +153,7 @@ export async function createPublicVoiceChannel(
     takeNumber(lobbyId, number)
     channelNumberById.set(tempChannel.id, number)
     channelLobbyById.set(tempChannel.id, lobbyId)
+    channelGuildById.set(tempChannel.id, guild.id)
     if (!tempChannelsByLobby.has(lobbyId)) tempChannelsByLobby.set(lobbyId, new Set())
     tempChannelsByLobby.get(lobbyId)!.add(tempChannel.id)
 
@@ -200,11 +221,11 @@ export function scheduleTempChannelDeletion(channelId: string, client: Client): 
       try {
         channel = (await client.channels.fetch(channelId)) as VoiceBasedChannel | null
       } catch {
-        releaseTracking(channelId)
+        await releaseTracking(channelId)
         return
       }
       if (!channel) {
-        releaseTracking(channelId)
+        await releaseTracking(channelId)
         return
       }
 
@@ -213,7 +234,7 @@ export function scheduleTempChannelDeletion(channelId: string, client: Client): 
 
       try {
         await channel.delete('Public voice channel empty — auto-deleted')
-        releaseTracking(channelId)
+        await releaseTracking(channelId)
         logger.info({ channel: channelId }, 'Public voice channel deleted (empty)')
       } catch (error) {
         logger.error({ error: String(error), channel: channelId }, 'Failed to delete public voice channel')
@@ -245,6 +266,7 @@ export function adoptExistingPublicChannels(guild: Guild, client: Client): void 
     takeNumber(lobbyId, number)
     channelNumberById.set(channelId, number)
     channelLobbyById.set(channelId, lobbyId)
+    channelGuildById.set(channelId, guild.id)
     if (!tempChannelsByLobby.has(lobbyId)) tempChannelsByLobby.set(lobbyId, new Set())
     tempChannelsByLobby.get(lobbyId)!.add(channelId)
     attachEmptyWatcher(channel as VoiceBasedChannel, client)
@@ -310,6 +332,7 @@ export function resetTempChannelTracking(): void {
   tempChannelsByLobby.clear()
   channelNumberById.clear()
   channelLobbyById.clear()
+  channelGuildById.clear()
   usedNumbersByLobby.clear()
   for (const timer of deleteTimers.values()) clearTimeout(timer)
   deleteTimers.clear()

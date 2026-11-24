@@ -173,7 +173,9 @@ describe('cleanup', () => {
       expect(getChannelNumbers().has('vc-1')).toBe(false)
       expect(getTrackedTempChannels().get('lobby-1')?.has('vc-1')).toBe(false)
       expect(mockedDb.channelConfiguration.delete).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { guildId: 'guild-1', channelId: 'vc-1' } })
+        expect.objectContaining({
+          where: { guildId_channelId: { guildId: 'guild-1', channelId: 'vc-1' } },
+        })
       )
     } finally {
       vi.useRealTimers()
