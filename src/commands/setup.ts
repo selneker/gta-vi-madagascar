@@ -1,5 +1,5 @@
 import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder } from 'discord.js'
-import { preview as previewSetup, apply as applySetup, audit as auditSetup } from '../services/server-setup.js'
+import { preview as previewSetup, apply as applySetup, cleanup as cleanupSetup, audit as auditSetup } from '../services/server-setup.js'
 import { logger } from '../lib/logger.js'
 import { PermissionBits } from '../config/permissions.js'
 
@@ -9,6 +9,7 @@ export const data = new SlashCommandBuilder()
   .addSubcommand((sub) => sub.setName('preview').setDescription("Preview structural changes without applying them"))
   .addSubcommand((sub) => sub.setName('apply').setDescription('Apply the configured server structure (idempotent)'))
   .addSubcommand((sub) => sub.setName('audit').setDescription('Audit the current guild against the desired configuration'))
+  .addSubcommand((sub) => sub.setName('cleanup').setDescription('Supprime les salons en doublon dans chaque catégorie'))
   // /setup is an administration action: restrict to server administrators.
   .setDefaultMemberPermissions(PermissionBits.ADMINISTRATOR)
 
@@ -28,6 +29,7 @@ export async function execute(
   try {
     if (subcommand === 'preview') result = await previewSetup(interaction.guild)
     else if (subcommand === 'apply') result = await applySetup(interaction.guild)
+    else if (subcommand === 'cleanup') result = await cleanupSetup(interaction.guild)
     else result = await auditSetup(interaction.guild)
   } catch (error) {
     deps.logger.error({ subcommand, error: String(error) }, 'setup command failed')
@@ -52,6 +54,11 @@ function buildEmbed(subcommand: string, result: any): EmbedBuilder {
         { name: 'Déjà en place', value: `Rôles: ${result.skipped.roles}, Salons: ${result.skipped.channels}`, inline: true }
       )
     if (result.warnings.length) embed.addFields({ name: 'Avertissements', value: result.warnings.join('\n') })
+  } else if (subcommand === 'cleanup') {
+    embed.addFields(
+      { name: 'Supprimés', value: `${result.removed} salon(s) en doublon`, inline: true },
+      { name: 'Conservés', value: `${result.kept} salon(s)`, inline: true }
+    )
   } else {
     const roleCounts: Record<'create' | 'update' | 'unchanged', number> = { create: 0, update: 0, unchanged: 0 }
     const channelCounts: Record<'create' | 'update' | 'unchanged', number> = { create: 0, update: 0, unchanged: 0 }
