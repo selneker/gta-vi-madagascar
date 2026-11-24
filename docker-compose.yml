@@ -1,0 +1,27 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: gta_madagascar
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: gta_madagascar
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gta_madagascar -d gta_madagascar"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    # Comment out Redis entirely if not justified; the bot works without it.
+
+volumes:
+  pgdata:

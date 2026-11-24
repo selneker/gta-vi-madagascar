@@ -1,0 +1,601 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Enums
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+enum NewsCategory {
+  OFFICIAL
+  GAME_UPDATES
+  GTA_VI
+  COMMUNITY
+  INDUSTRY
+  UNCONFIRMED
+}
+
+enum NewsStatus {
+  COLLECTED
+  PENDING_REVIEW
+  APPROVED
+  PUBLISHED
+  ARCHIVED
+}
+
+enum ConfirmationStatus {
+  CONFIRMED
+  UNCONFIRMED
+}
+
+enum StreamerApplicationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum LiveSessionStatus {
+  SCHEDULED
+  LIVE
+  ENDED
+  CANCELLED
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum TicketType {
+  SUPPORT
+  REPORT
+  PARTNERSHIP
+  TECHNICAL
+}
+
+enum ModerationActionType {
+  WARN
+  TIMEOUT
+  UNTIMEOUT
+  KICK
+  BAN
+  UNBAN
+  LOCK
+  UNLOCK
+}
+
+enum EventType {
+  QUIZ
+  TOURNAMENT
+  LIVE_COMPETITION
+  SCREENSHOT_CHALLENGE
+  COMMUNITY_NIGHT
+}
+
+enum EventParticipantStatus {
+  REGISTERED
+  INTERESTED
+  ATTENDED
+}
+
+enum Language {
+  MALAGASY
+  FRENCH
+  ENGLISH
+}
+
+enum StatisticsPeriod {
+  WEEKLY
+  MONTHLY
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Core
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+model GuildConfiguration {
+  id            String   @id @default(cuid())
+  guildId       String   @unique
+  name          String?
+  language      Language @default(FRENCH)
+  timezone      String   @default("Africa/Antananarivo")
+  commandPrefix String   @default("/")
+  liveChannelId String?
+  newsChannelId String?
+  staffRoleId   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  channels            ChannelConfiguration[]
+  roles               RoleConfiguration[]
+  memberProfiles      MemberProfile[]
+  liveSessions        LiveSession[]
+  liveSchedules       LiveSchedule[]
+  liveStatistics      LiveStatistics[]
+  newsArticles        NewsArticle[]
+  newsSources         NewsSource[]
+  newsPublications    NewsPublication[]
+  newsSubmissions     NewsSubmission[]
+  newsApprovals       NewsApproval[]
+  events              Event[]
+  warnings            Warning[]
+  moderationActions   ModerationAction[]
+  securityEvents      SecurityEvent[]
+  tickets             Ticket[]
+  auditLogs           AuditLog[]
+  xpTransactions      XPTransaction[]
+  notificationPrefs   LiveNotificationPreference[]
+  streamerApplications StreamerApplication[]
+
+  @@map("guild_configurations")
+}
+
+model ChannelConfiguration {
+  id          String @id @default(cuid())
+  guildId     String
+  channelId   String
+  categoryId  String?
+  name        String
+  type        String
+  topic       String?
+  position    Int
+  nsfw        Boolean @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  guild GuildConfiguration @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
+
+  @@unique([guildId, channelId])
+  @@index([guildId, type])
+  @@map("channel_configurations")
+}
+
+model RoleConfiguration {
+  id          String @id @default(cuid())
+  guildId     String
+  roleId      String
+  name        String
+  color       String?
+  hoist       Boolean @default(false)
+  mentionable Boolean @default(false)
+  position    Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  guild GuildConfiguration @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
+
+  @@unique([guildId, roleId])
+  @@map("role_configurations")
+}
+
+model MemberProfile {
+  id                String   @id @default(cuid())
+  userId            String   @unique
+  guildId           String
+  language          Language @default(FRENCH)
+  platform          String?
+  bio               String?
+  xp                Int      @default(0)
+  level             Int      @default(1)
+  xpTransactions    XPTransaction[]
+  tickets           Ticket[]
+
+  guild GuildConfiguration @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
+
+  @@map("member_profiles")
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Live Center
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+model StreamerApplication {
+  id             String                   @id @default(cuid())
+  userId         String   @unique
+  guildId        String
+  status         StreamerApplicationStatus @default(PENDING)
+  platform       String
+  games          String[]
+  language       Language
+  channelUrl     String?
+  introduction   String
+  reviewedBy     String?
+  reviewedAt     DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  guild GuildConfiguration @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
+
+  @@index([guildId, status])
+  @@map("streamer_applications")
+}
+
+model LiveSession {
+  id                   String   @id @default(cuid())
+  guildId              String
+  title                String
+  game                 String
+  language             Language
+  voiceChannelId       String
+  stageChannelId       String?
+  externalUrl          String?
+  description          String?
+  status               LiveSessionStatus @default(SCHEDULED)
+  hostId               String
+  startTime            DateTime
+  endTime              DateTime?
+  durationSeconds      Int?
+  voiceAttendance      Int   @default(0)
+  announcementMessageId String?
+  discordScheduledEventId String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  guild      GuildConfiguration @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
+  participants LiveParticipant[]
+
+  @@index([guildId, status])
+  @@index([hostId])
+  @@index([startTime])
+  @@map("live_sessions")
+}
+
+model LiveParticipant {
+  id            String   @id @default(cuid())
+  sessionId     String
+  userId        String
+  joinedAt      DateTime @default(now())
+  leftAt        DateTime?
+  durationSeconds Int?
+
+  session LiveSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, userId])
+  @@index([userId])
+  @@map("live_participants")
+}
+
+model LiveSchedule {
+  id          String @id @default(cuid())
+  guildId     String
+  title       String
+  game        String
+  hostId      String
+  guestIds    String[]
+  channelId   String
+  scheduledStart DateTime
+  scheduledEnd DateTime
+  status      String @default("SCHEDULED")
+  discordScheduledEventId String?
+  registrationCount Int @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  guild GuildConfiguration @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
+
+  @@index([guildId, status])
+  @@index([scheduledStart])
+  @@map("live_schedules")
+}
+
+model LiveNotificationPreference {
+  id        String @id @default(cuid())
+  userId    String @unique
+  guildId   String
+  subscribed Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  guild GuildConfiguration @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
+
+  @@map("live_notification_preferences")
+}
+
+model LiveStatistics {
+  id            String   @id @default(cuid())
+  guildId       String
+  period        StatisticsPeriod
+  startDate     DateTime
+  endDate       DateTime
+  streamCount   Int      @default(0)
+  totalHours    Float    @default(0)
+  uniqueStreamers Int   @default(0)
+  totalAttendance Int   @default(0)
+  createdAt     DateTime @default(now())
+
+  guild GuildConfiguration @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
+
+  @@unique([guildId, period, startDate])
+  @@map("live_statistics")
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Newsroom
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+model NewsArticle {
+  id                   String   @id @default(cuid())
+  guildId              String
+  title                String
+  summary              String
+  category             NewsCategory
+  status               NewsStatus @default(COLLECTED)
+  confirmationStatus   ConfirmationStatus @default(UNCONFIRMED)
+  thumbnailUrl         String?
+  sourceUrl            String?
+  originalPublishedAt  DateTime?
+  publishedAt          DateTime?
+  language             Language
+  authorId             String
+  approverId           String?
+  publisherId          String?
+  announcementChannelId String?
+  announcementMessageId String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  guild       GuildConfiguration @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
+  revisions   NewsRevision[]
+  publication NewsPublication?
+
+  @@index([guildId, status])
+  @@index([guildId, category])
+  @@index([sourceUrl])
+  @@map("news_articles")
+}
+
+model NewsRevision {
+  id        String @id @default(cuid())
+  articleId String
+  field     String
+  oldValue  String?
+  newValue  String?
+  changedBy String
+  changedAt DateTime @default(now())
+
+  article NewsArticle @relation(fields: [articleId], references: [id], onDelete: Cascade)
+
+  @@map("news_revisions")
+}
+
+model NewsPublication {
+  id           String @id @default(cuid())
+  articleId    String @unique
+  guildId      String
+  publishedAt  DateTime @default(now())
+  channelId    String
+  messageId    String
+  publishedBy  String
+
+  guild      GuildConfiguration @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
+  article    NewsArticle @relation(fields: [articleId], references: [id], onDelete: Cascade)
+
+  @@map("news_publications")
+}
+
+model NewsSource {
+  id          String @id @default(cuid())
+  guildId     String?
+  name        String
+  type        String
+  url         String
+  allowlisted Boolean @default(true)
+  enabled     Boolean @default(true)
+  lastCheckedAt DateTime?
+  lastItemId  String?
+
+  guild GuildConfiguration? @relation(fields: [guildId], references: [guildId], onDelete: SetNull)
+
+  @@map("news_sources")
+}
+
+model NewsSubmission {
+  id          String @id @default(cuid())
+  guildId     String
+  title       String
+  summary     String
+  category    NewsCategory
+  sourceUrl   String?
+  sourceName  String?
+  submittedBy String
+  status      String @default("PENDING")
+  reviewerId  String?
+  reviewNote  String?
+  createdAt   DateTime @default(now())
+  reviewedAt  DateTime?
+
+  guild GuildConfiguration @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
+
+  @@index([guildId, status])
+  @@map("news_submissions")
+}
+
+model NewsApproval {
+  id        String @id @default(cuid())
+  guildId   String
+  targetId  String
+  targetType String
+  approverId String
+  status    String
+  comment   String?
+  createdAt DateTime @default(now())
+
+  guild GuildConfiguration @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
+
+  @@map("news_approvals")
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Community (events, badges, XP)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+model Event {
+  id                   String   @id @default(cuid())
+  guildId              String
+  title                String
+  description          String?
+  type                 EventType
+  scheduledStart       DateTime
+  scheduledEnd         DateTime
+  location             String?
+  discordScheduledEventId String?
+  status               String   @default("SCHEDULED")
+  createdBy            String
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  guild       GuildConfiguration @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
+  participants EventParticipant[]
+
+  @@index([guildId, status])
+  @@index([scheduledStart])
+  @@map("events")
+}
+
+model EventParticipant {
+  id        String @id @default(cuid())
+  eventId   String
+  userId    String
+  status    EventParticipantStatus @default(REGISTERED)
+  joinedAt  DateTime @default(now())
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, userId])
+  @@map("event_participants")
+}
+
+model XPTransaction {
+  id        String @id @default(cuid())
+  userId    String
+  guildId   String
+  amount    Int
+  reason    String
+  source    String
+  relatedId String?
+  createdAt DateTime @default(now())
+
+  guild   GuildConfiguration @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
+  user    MemberProfile?     @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  @@index([guildId, userId])
+  @@map("xp_transactions")
+}
+
+model Badge {
+  id          String @id @default(cuid())
+  code        String @unique
+  name        String
+  description String?
+  imageUrl    String?
+  category    String
+  awardedTo   MemberBadge[]
+
+  @@map("badges")
+}
+
+model MemberBadge {
+  id        String @id @default(cuid())
+  userId    String
+  badgeId   String
+  awardedAt DateTime @default(now())
+  awardedBy String?
+
+  badge Badge @relation(fields: [badgeId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, badgeId])
+  @@map("member_badges")
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Moderation & security
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+model Warning {
+  id        String @id @default(cuid())
+  userId    String
+  guildId   String
+  moderatorId String
+  reason    String
+  createdAt DateTime @default(now())
+  expiresAt DateTime?
+
+  guild GuildConfiguration @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
+
+  @@index([guildId, userId])
+  @@map("warnings")
+}
+
+model ModerationAction {
+  id          String @id @default(cuid())
+  userId      String
+  guildId     String
+  moderatorId String
+  type        ModerationActionType
+  reason      String
+  durationSeconds Int?
+  createdAt   DateTime @default(now())
+
+  guild GuildConfiguration @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
+
+  @@index([guildId, userId])
+  @@index([guildId, type])
+  @@map("moderation_actions")
+}
+
+model SecurityEvent {
+  id        String @id @default(cuid())
+  guildId   String
+  type      String
+  userId    String?
+  channelId String?
+  details   Json?
+  createdAt DateTime @default(now())
+
+  guild GuildConfiguration @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
+
+  @@index([guildId, type])
+  @@index([guildId, createdAt])
+  @@map("security_events")
+}
+
+model Ticket {
+  id        String @id @default(cuid())
+  guildId   String
+  userId    String
+  channelId String @unique
+  type      TicketType
+  status    TicketStatus @default(OPEN)
+  createdAt DateTime @default(now())
+  closedAt  DateTime?
+  closedBy  String?
+
+  guild   GuildConfiguration @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
+  user    MemberProfile?     @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  @@map("tickets")
+}
+
+model AuditLog {
+  id        String @id @default(cuid())
+  guildId   String
+  actorId   String
+  action    String
+  targetId  String?
+  targetType String?
+  details   Json?
+  createdAt DateTime @default(now())
+
+  guild GuildConfiguration @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
+
+  @@index([guildId, createdAt])
+  @@index([actorId])
+  @@map("audit_logs")
+}

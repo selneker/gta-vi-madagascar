@@ -1,0 +1,42 @@
+{
+  "name": "gta-vi-madagascar",
+  "version": "1.0.0",
+  "description": "GTA VI MADAGASCAR — Discord Live Center & Newsroom community ecosystem (Malagasy / French / English)",
+  "private": true,
+  "packageManager": "npm@11.19.0",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/src/index.js",
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate:dev": "prisma migrate dev",
+    "prisma:migrate:deploy": "prisma migrate deploy",
+    "prisma:studio": "prisma studio",
+    "lint": "eslint src tests",
+    "format": "prettier --write ."
+  },
+  "dependencies": {
+    "@prisma/client": "^6.4.0",
+    "@discordjs/rest": "^2.4.0",
+    "discord.js": "^14.17.0",
+    "luxon": "^3.5.0",
+    "pino": "^9.8.0",
+    "pino-pretty": "^11.3.0",
+    "zod": "^3.24.2",
+    "dotenv": "^16.4.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.12.0",
+    "eslint": "^9.18.0",
+    "prettier": "^3.4.0",
+    "prisma": "^6.4.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.8.0",
+    "vitest": "^2.1.8"
+  }
+}

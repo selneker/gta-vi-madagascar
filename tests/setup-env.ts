@@ -1,0 +1,6 @@
+process.env.DISCORD_TOKEN = 'test-token'
+process.env.DISCORD_CLIENT_ID = '111'
+process.env.DISCORD_GUILD_ID = '222'
+process.env.DATABASE_URL = 'postgresql://postgres:postgres@localhost:5432/gta_test'
+process.env.NODE_ENV = 'test'
+process.env.TIMEZONE = 'Africa/Antananarivo'
