@@ -1,5 +1,6 @@
 import { GtaMadagascarBot } from './client.js'
 import { config } from './config/index.js'
+import { startHealthServer } from './health.js'
 import { logger } from './lib/logger.js'
 
 const bot = new GtaMadagascarBot()
@@ -19,6 +20,9 @@ async function shutdown(signal: string): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  // Bind the platform-provided port first so the service is reported live
+  // while Discord login and command registration are still in progress.
+  startHealthServer()
   await bot.start(config.DISCORD_TOKEN)
 }
 
