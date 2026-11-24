@@ -13,8 +13,8 @@ RUN npm ci --omit=dev
 COPY prisma ./prisma
 RUN npx prisma generate
 
-COPY dist ./dist
-COPY .env ./
+COPY src ./src
+RUN npm run build
 
 EXPOSE 3000
 
