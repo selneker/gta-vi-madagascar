@@ -200,14 +200,23 @@ export async function apply(guild: Guild): Promise<SetupResult> {
     const overwrites = permissionOverwrites(def.id, resolvedRoles, everyoneRole, discordChannelType(def.type))
 
     if (!existing) {
-      const created = await guild.channels.create({
-        name: def.name,
-        type: discordChannelType(def.type),
-        parent: def.category ? parent : undefined,
-        topic: def.type === 'text' || def.type === 'news' ? def.topic : undefined,
-        nsfw: def.nsfw ?? false,
-        reason: 'GTA VI MADAGASCAR /setup apply',
-      } as Parameters<Guild['channels']['create']>[0])
+      let created
+      try {
+        created = await guild.channels.create({
+          name: def.name,
+          type: discordChannelType(def.type),
+          parent: def.category ? parent : undefined,
+          topic: def.type === 'text' || def.type === 'news' ? def.topic : undefined,
+          nsfw: def.nsfw ?? false,
+          reason: 'GTA VI MADAGASCAR /setup apply',
+        } as Parameters<Guild['channels']['create']>[0])
+      } catch (error) {
+        // Une création rejetée par Discord (ex: type de canal incompatible sur ce serveur, 50024)
+        // ne doit pas faire échouer tout le /setup apply. On signale et on passe au suivant.
+        logger.error({ channel: def.name, type: def.type, category: def.category, guild: guild.id, error: String(error) }, 'Channel creation skipped — incompatible channel type')
+        warnings.push(`Impossible de créer le salon « ${def.name}» (${def.type}): ${error instanceof Error ? error.message : String(error)}. Vérifiez les permissions du bot et le type de serveur.`)
+        continue
+      }
       await applyOverwrites(created, overwrites)
       try { await created.setPosition(def.position ?? 0, { reason: 'GTA VI MADAGASCAR /setup apply' }) } catch { /* */ }
       channelsCreated++
@@ -227,10 +236,19 @@ export async function apply(guild: Guild): Promise<SetupResult> {
       if (isTextOrNews) updates.topic = def.topic
       if (existing.type !== ChannelType.GuildCategory) updates.nsfw = def.nsfw ?? false
       if (def.category && (existing.parentId ?? null) !== (parent?.id ?? null)) updates.parent = parent
-      await existing.edit(updates)
-      await applyOverwrites(existing, overwrites)
-      channelsUpdated++
-      logger.info({ channel: def.name, guild: guild.id }, 'channel updated')
+      let edited = false
+      try {
+        await existing.edit(updates)
+        edited = true
+      } catch (error) {
+        logger.error({ channel: def.name, type: existing.type, guild: guild.id, error: String(error) }, 'Channel edit skipped — incompatible channel type')
+        warnings.push(`Impossible de mettre à jour le salon « ${def.name}»: ${error instanceof Error ? error.message : String(error)}. Vérifiez les permissions du bot et le type de serveur.`)
+      }
+      if (edited) {
+        await applyOverwrites(existing, overwrites)
+        channelsUpdated++
+        logger.info({ channel: def.name, guild: guild.id }, 'channel updated')
+      }
     }
     try { await existing.setPosition(def.position ?? 0, { reason: 'GTA VI MADAGASCAR /setup apply' }) } catch { /* */ }
   }
