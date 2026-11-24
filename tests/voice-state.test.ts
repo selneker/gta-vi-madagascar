@@ -108,7 +108,7 @@ describe('createPublicVoiceChannel', () => {
 
   it('assigns unique numbers when several members join simultaneously', async () => {
     const { guild, lobby } = makeGuildAndLobby()
-    const members = ['u1', 'u2', 'u3', 'u4'].map(makeMember)
+    const members = ['u1', 'u2', 'u3', 'u4'].map((id) => makeMember(id, false))
 
     await Promise.all(members.map((m) => createPublicVoiceChannel(m, lobby, guild, makeClient())))
 
@@ -156,14 +156,18 @@ describe('cleanup', () => {
     vi.useFakeTimers()
     try {
       const { guild, lobby, created } = makeGuildAndLobby()
+      await createPublicVoiceChannel(makeMember('u1'), lobby, guild, makeClient())
       const channel = created[0]
+      channel.members.size = 0
       const client = makeClient(channel)
-      await createPublicVoiceChannel(makeMember('u1'), lobby, guild, client)
 
       expect(getChannelNumbers().has('vc-1')).toBe(true)
 
       scheduleTempChannelDeletion('vc-1', client)
       vi.advanceTimersByTime(5 * 60 * 1000 + 10)
+      // Le rappel du timer est asynchrone (fetch → delete → releaseTracking) :
+      // on vide plusieurs microtasks pour le laisser courir jusqu'au bout.
+      for (let i = 0; i < 3; i++) await Promise.resolve()
 
       expect(channel.delete).toHaveBeenCalled()
       expect(getChannelNumbers().has('vc-1')).toBe(false)

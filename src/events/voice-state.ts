@@ -44,7 +44,9 @@ const usedNumbersByLobby = new Map<string, Set<number>>()
 /** channelId => deletion timer. */
 const deleteTimers = new Map<string, NodeJS.Timeout>()
 
-/** Serializes PUBLIC channel creation so numbering stays atomic under concurrency. */
+/** Serializes PUBLIC channel creation so numbering stays atomic under concurrency. The absorbed
+ * catch keeps the chain alive even if one creation fails, so a single failed creation never
+ * blocks subsequent lobby joins. */
 let createLock: Promise<void> = Promise.resolve()
 
 function enqueueCreate<T>(task: () => Promise<T>): Promise<T> {
