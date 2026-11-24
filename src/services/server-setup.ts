@@ -194,13 +194,28 @@ export async function apply(guild: Guild): Promise<SetupResult> {
       ? existingChannels.find((c) => c?.name === categoryById(def.category!)?.name && c?.type === ChannelType.GuildCategory)
       : undefined
     const parentId = parent?.id ?? null
-    const existing = existingChannels.find(
+    let existing = existingChannels.find(
       (c) => c?.name === def.name && (!def.category || (c?.parentId ?? null) === parentId)
     )
+
+    // Reconnaissance par "nom de base" (préfixe de style ╭ㆍ│ㆍ╰ㆍ retiré) afin
+    // d'éviter les doublons quand le style de nommage d'un salon change :
+    // un salon déjà présent sous un ancien nom est renommé plutôt que recréé.
+    if (!existing && def.category) {
+      const baseName = def.name.replace(/^[╭│╰]ㆍ\s*/, '')
+      const renamed = existingChannels.find(
+        (c) => c?.type !== ChannelType.GuildCategory
+          && (c?.parentId ?? null) === parentId
+          && c?.name === baseName
+      )
+      if (renamed) existing = renamed
+    }
+
     const overwrites = permissionOverwrites(def.id, resolvedRoles, everyoneRole, discordChannelType(def.type))
 
     if (!existing) {
       let created
+      let creationError: unknown = null
       try {
         created = await guild.channels.create({
           name: def.name,
@@ -211,10 +226,29 @@ export async function apply(guild: Guild): Promise<SetupResult> {
           reason: 'GTA VI MADAGASCAR /setup apply',
         } as Parameters<Guild['channels']['create']>[0])
       } catch (error) {
-        // Une création rejetée par Discord (ex: type de canal incompatible sur ce serveur, 50024)
-        // ne doit pas faire échouer tout le /setup apply. On signale et on passe au suivant.
-        logger.error({ channel: def.name, type: def.type, category: def.category, guild: guild.id, error: String(error) }, 'Channel creation skipped — incompatible channel type')
-        warnings.push(`Impossible de créer le salon « ${def.name}» (${def.type}): ${error instanceof Error ? error.message : String(error)}. Vérifiez les permissions du bot et le type de serveur.`)
+        creationError = error
+        // Les salons de scène (stage) et d'actualités (news) requièrent un
+        // serveur Discord "Community". Si ce n'est pas le cas, on tente un
+        // salon vocal classique en fallback pour ne pas bloquer tout le setup.
+        if (def.type === 'stage') {
+          try {
+            created = await guild.channels.create({
+              name: def.name,
+              type: ChannelType.GuildVoice,
+              parent: def.category ? parent : undefined,
+              topic: undefined,
+              nsfw: def.nsfw ?? false,
+              reason: 'GTA VI MADAGASCAR /setup apply (stage → voice fallback)',
+            } as Parameters<Guild['channels']['create']>[0])
+            creationError = null
+          } catch (fallbackError) {
+            creationError = fallbackError
+          }
+        }
+      }
+      if (!created) {
+        logger.error({ channel: def.name, type: def.type, category: def.category, guild: guild.id, error: String(creationError) }, 'Channel creation skipped — incompatible channel type')
+        warnings.push(`Impossible de créer le salon « ${def.name}» (${def.type}): ${creationError instanceof Error ? creationError.message : String(creationError)}. Vérifiez les permissions du bot et le type de serveur.`)
         continue
       }
       await applyOverwrites(created, overwrites)
@@ -227,12 +261,13 @@ export async function apply(guild: Guild): Promise<SetupResult> {
     const isTextOrNews = existing.type === ChannelType.GuildText || existing.type === ChannelType.GuildNews
     let needsUpdate = false
     if (existing.type !== discordChannelType(def.type)) needsUpdate = true
-    if (isTextOrNews && existing.topic !== def.topic) needsUpdate = true
+    if (isTextOrNews && (existing as TextChannel | NewsChannel).topic !== def.topic) needsUpdate = true
     if (existing.type !== ChannelType.GuildCategory && existing.nsfw !== (def.nsfw ?? false)) needsUpdate = true
     if (def.category && (existing.parentId ?? null) !== (parent?.id ?? null)) needsUpdate = true
 
     if (needsUpdate) {
       const updates: Record<string, unknown> = { reason: 'GTA VI MADAGASCAR /setup apply' }
+      if (existing.name !== def.name) updates.name = def.name
       if (isTextOrNews) updates.topic = def.topic
       if (existing.type !== ChannelType.GuildCategory) updates.nsfw = def.nsfw ?? false
       if (def.category && (existing.parentId ?? null) !== (parent?.id ?? null)) updates.parent = parent
