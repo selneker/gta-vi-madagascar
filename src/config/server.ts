@@ -143,6 +143,21 @@ export const Channels: ChannelDef[] = [
   { id: 'ch_security_logs', name: '🚨・security-logs', type: 'text', category: 'cat_staff', topic: 'Événements de sécurité.', position: 84 },
   { id: 'ch_news_review', name: '📰・news-review', type: 'text', category: 'cat_staff', topic: 'Revue des articles de news avant publication.', position: 85 },
   { id: 'ch_live_management', name: '🔴・live-management', type: 'text', category: 'cat_staff', topic: 'Gestion du Live Center.', position: 86 },
+
+  // --- CLAN / TEAMS ---
+  { id: 'cat_clan_teams', name: '[CLAN / TEAMS]', type: 'category', position: 87 },
+  { id: 'ch_presentation_teams', name: 'présentation-teams', type: 'text', category: 'cat_clan_teams', topic: 'Présentez votre team / clan', position: 88 },
+  { id: 'ch_clan_recrutement', name: 'clan-recrutement', type: 'text', category: 'cat_clan_teams', topic: 'Recrutement de membres pour votre clan', position: 89 },
+  { id: 'ch_recherche_clan', name: 'recherche-clan', type: 'text', category: 'cat_clan_teams', topic: 'Cherchez un clan à rejoindre', position: 90 },
+  { id: 'ch_alliances', name: 'alliances', type: 'text', category: 'cat_clan_teams', topic: 'Alliances entre clans', position: 91 },
+
+  // --- ROOM & SCRIMS ---
+  { id: 'cat_room_scrims', name: '[ROOM & SCRIMS]', type: 'category', position: 92 },
+  { id: 'ch_annonces_scrims', name: 'annonces-scrims', type: 'text', category: 'cat_room_scrims', topic: 'Annonces de scrims et matchs', position: 93 },
+  { id: 'ch_room_wow', name: 'room-wow', type: 'text', category: 'cat_room_scrims', topic: 'Room scrim WOW', position: 94 },
+  { id: 'ch_tdm', name: 'tdm', type: 'text', category: 'cat_room_scrims', topic: 'Room scrim Team Deathmatch', position: 95 },
+  { id: 'ch_room_classique', name: 'room-classique', type: 'text', category: 'cat_room_scrims', topic: 'Room scrim classique', position: 96 },
+  { id: 'ch_arbitre_vocal', name: 'arbitre-vocal', type: 'voice', category: 'cat_room_scrims', topic: 'Canal vocal des arbitres', position: 97 },
 ]
 
 export function categoryById(id: string): ChannelDef | undefined {

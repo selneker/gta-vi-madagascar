@@ -28,7 +28,7 @@ describe('desiredServerState', () => {
   it('returns every configured role and channel', () => {
     const { roles, channels } = desiredServerState()
     expect(roles.length).toBe(29)
-    expect(channels.length).toBe(57)
+    expect(channels.length).toBe(68)
     for (const role of roles) {
       expect(role.position).toBeGreaterThan(0)
       expect(role.permissions.length).toBeGreaterThan(0)

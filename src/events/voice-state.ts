@@ -1,24 +1,258 @@
-import { Events, VoiceState, type Client } from 'discord.js'
+import {
+  ChannelType,
+  Events,
+  type Client,
+  type Guild,
+  type VoiceBasedChannel,
+  type VoiceState,
+} from 'discord.js'
 import { logger } from '../lib/logger.js'
+import { db } from '../lib/db.js'
 
+/**
+ * Join-to-Create public voice channels.
+ *
+ * Reuses the pre-existing lobby channel 🔴・CREATE YOUR LIVE ROOM (never recreated).
+ * When a member joins it, a new PUBLIC N voice channel is created, the member is
+ * moved into it, and the channel is deleted automatically when it becomes empty.
+ */
+
+/** The pre-existing Join-to-Create lobby. Never recreated by this module. */
 const LOBBY_CHANNEL_NAME = '🔴・CREATE YOUR LIVE ROOM'
-const TEMP_CHANNEL_PREFIX = '🔴・Live de '
-const DELETE_AFTER_EMPTY_MS = 5 * 60 * 1000 // 5 minutes
 
-/** Map of lobby voice channel ID → set of temp channel IDs created from it. */
+/** Name of an auto-created public voice channel: PUBLIC 1, PUBLIC 2, ... */
+const publicChannelName = (n: number): string => `PUBLIC ${n}`
+
+/** Permissions granted to @everyone in every PUBLIC channel (fully open). */
+const publicPermissions = ['VIEW_CHANNEL', 'CONNECT', 'SPEAK', 'USE_VAD', 'STREAM']
+
+/** Delay before an empty PUBLIC channel is deleted (configurable constant). */
+const deleteAfterEmptyMs = 5 * 60 * 1000 // 5 minutes
+
+/** lobbyId => set of temp channel ids created from it. */
 const tempChannelsByLobby = new Map<string, Set<string>>()
 
-/** Timers for auto-deleting empty temp channels. */
+/** channelId => its PUBLIC number. */
+const channelNumberById = new Map<string, number>()
+
+/** channelId => lobby id it belongs to. */
+const channelLobbyById = new Map<string, string>()
+
+/** lobbyId => set of PUBLIC numbers currently in use. */
+const usedNumbersByLobby = new Map<string, Set<number>>()
+
+/** channelId => deletion timer. */
 const deleteTimers = new Map<string, NodeJS.Timeout>()
 
-export function registerVoiceStateEvents(client: Client): void {
-  client.on(Events.VoiceStateUpdate, async (oldState: VoiceState, newState: VoiceState) => {
+/** Serializes PUBLIC channel creation so numbering stays atomic under concurrency. */
+let createLock: Promise<void> = Promise.resolve()
+
+function enqueueCreate<T>(task: () => Promise<T>): Promise<T> {
+  const next = createLock.then(() => task())
+  createLock = next.then(() => undefined, () => undefined)
+  return next
+}
+
+function getLobbyChannel(guild: Guild): any {
+  return guild.channels.cache.find(
+    (c) => c.type === ChannelType.GuildVoice && c.name === LOBBY_CHANNEL_NAME
+  )
+}
+
+function nextFreeNumber(lobbyId: string): number {
+  const used = usedNumbersByLobby.get(lobbyId) ?? new Set()
+  let n = 1
+  while (used.has(n)) n++
+  return n
+}
+
+function takeNumber(lobbyId: string, number: number): void {
+  let used = usedNumbersByLobby.get(lobbyId)
+  if (!used) {
+    used = new Set()
+    usedNumbersByLobby.set(lobbyId, used)
+  }
+  used.add(number)
+}
+
+function releaseTracking(channelId: string): void {
+  const lobbyId = channelLobbyById.get(channelId)
+  const number = channelNumberById.get(channelId)
+  channelLobbyById.delete(channelId)
+  channelNumberById.delete(channelId)
+  if (lobbyId === undefined) return
+  const channels = tempChannelsByLobby.get(lobbyId)
+  if (channels) channels.delete(channelId)
+  if (number !== undefined) {
+    const used = usedNumbersByLobby.get(lobbyId)
+    if (used) used.delete(number)
+  }
+}
+
+function clearDeletionTimer(channelId: string): void {
+  const existing = deleteTimers.get(channelId)
+  if (existing) {
+    clearTimeout(existing)
+    deleteTimers.delete(channelId)
+  }
+}
+
+/**
+ * Create a PUBLIC N voice channel next to the lobby, open it to everyone,
+ * register it, move the member in, and start watching it for auto-deletion.
+ */
+export async function createPublicVoiceChannel(
+  member: any,
+  lobbyChannel: any,
+  guild: Guild,
+  client: Client
+): Promise<void> {
+  if (member.user.bot) return
+
+  await enqueueCreate(async () => {
+    const lobbyId = lobbyChannel.id
+    const category = lobbyChannel.parent as any
+    const number = nextFreeNumber(lobbyId)
+    const name = publicChannelName(number)
+
+    const everyoneRole = guild.roles.everyone
+    const overwrites = [
+      { id: everyoneRole.id, allow: publicPermissions, deny: [] },
+    ]
+
+    const tempChannel = (await guild.channels.create({
+      name,
+      type: ChannelType.GuildVoice,
+      parent: category,
+      permissionOverwrites: overwrites as any,
+      reason: 'GTA VI MADAGASCAR — public dynamic voice channel',
+    })) as VoiceBasedChannel
+
+    takeNumber(lobbyId, number)
+    channelNumberById.set(tempChannel.id, number)
+    channelLobbyById.set(tempChannel.id, lobbyId)
+    if (!tempChannelsByLobby.has(lobbyId)) tempChannelsByLobby.set(lobbyId, new Set())
+    tempChannelsByLobby.get(lobbyId)!.add(tempChannel.id)
+
+    // Register in the database so the channel survives a restart inventory.
     try {
-      await handleVoiceStateUpdate(oldState, newState, client)
+      await db.channelConfiguration.create({
+        data: {
+          guildId: guild.id,
+          channelId: tempChannel.id,
+          categoryId: category?.id ?? null,
+          name: tempChannel.name,
+          type: 'voice',
+          position: 0,
+          nsfw: false,
+        },
+      })
     } catch (error) {
-      logger.error({ error: String(error) }, 'Voice state update handler failed')
+      logger.error(
+        { error: String(error), channel: tempChannel.id, guild: guild.id },
+        'Failed to register public voice channel in database'
+      )
+    }
+
+    attachEmptyWatcher(tempChannel, client)
+
+    try {
+      await member.voice.setChannel(tempChannel, 'Public voice channel created')
+    } catch (error) {
+      logger.error(
+        { error: String(error), channel: tempChannel.id, user: member.user.id },
+        'Failed to move member to public voice channel'
+      )
+    }
+
+    logger.info(
+      { channel: tempChannel.id, number, user: member.user.id, guild: guild.id },
+      'Public voice channel created'
+    )
+  })
+}
+
+/** Attach the empty-check watcher to a PUBLIC channel. */
+function attachEmptyWatcher(channel: any, client: Client): void {
+  channel.on('voiceStateUpdate', (_oldState: VoiceState, newState: VoiceState) => {
+    if (newState.channelId === channel.id && newState.member) {
+      // Someone joined: cancel any pending deletion.
+      clearDeletionTimer(channel.id)
+      return
+    }
+    if (channel.members.size === 0) {
+      scheduleTempChannelDeletion(channel.id, client)
     }
   })
+}
+
+export function scheduleTempChannelDeletion(channelId: string, client: Client): void {
+  clearDeletionTimer(channelId)
+
+  deleteTimers.set(
+    channelId,
+    setTimeout(async () => {
+      deleteTimers.delete(channelId)
+
+      let channel: VoiceBasedChannel | null
+      try {
+        channel = (await client.channels.fetch(channelId)) as VoiceBasedChannel | null
+      } catch {
+        releaseTracking(channelId)
+        return
+      }
+      if (!channel) {
+        releaseTracking(channelId)
+        return
+      }
+
+      // Still occupied: keep tracking, the watcher will re-schedule when empty.
+      if (channel.members.size > 0) return
+
+      try {
+        await channel.delete('Public voice channel empty — auto-deleted')
+        releaseTracking(channelId)
+        logger.info({ channel: channelId }, 'Public voice channel deleted (empty)')
+      } catch (error) {
+        logger.error({ error: String(error), channel: channelId }, 'Failed to delete public voice channel')
+        // Keep tracking: the watcher re-schedules deletion when it empties again.
+      }
+    }, deleteAfterEmptyMs)
+  )
+}
+
+/**
+ * Re-adopt PUBLIC channels that already exist after a bot restart, so tracking,
+ * numbering and auto-deletion timers are rebuilt without Discord calls.
+ */
+export function adoptExistingPublicChannels(guild: Guild, client: Client): void {
+  const lobbyChannel = getLobbyChannel(guild) as any
+  if (!lobbyChannel) return
+  const category = lobbyChannel.parent as any
+  if (!category) return
+  const lobbyId = lobbyChannel.id
+
+  for (const channel of category.children.cache.values()) {
+    if (!channel.isVoiceBased()) continue
+    const match = channel.name.match(/^PUBLIC (\d+)$/)
+    if (!match) continue
+    const channelId = channel.id
+    const number = parseInt(match[1], 10)
+    if (tempChannelsByLobby.get(lobbyId)?.has(channelId)) continue
+
+    takeNumber(lobbyId, number)
+    channelNumberById.set(channelId, number)
+    channelLobbyById.set(channelId, lobbyId)
+    if (!tempChannelsByLobby.has(lobbyId)) tempChannelsByLobby.set(lobbyId, new Set())
+    tempChannelsByLobby.get(lobbyId)!.add(channelId)
+    attachEmptyWatcher(channel as VoiceBasedChannel, client)
+    if (channel.members.size === 0) scheduleTempChannelDeletion(channelId, client)
+
+    logger.info(
+      { channel: channelId, number, guild: guild.id },
+      'Existing public voice channel re-adopted after restart'
+    )
+  }
 }
 
 async function handleVoiceStateUpdate(
@@ -29,118 +263,67 @@ async function handleVoiceStateUpdate(
   const guild = newState.guild
   if (!guild) return
 
-  const lobbyChannel = guild.channels.cache.find(
-    (c: any) => c.type === 2 && c.name === LOBBY_CHANNEL_NAME
-  ) as any
+  const lobbyChannel = getLobbyChannel(guild) as any
   if (!lobbyChannel) return
-
   const lobbyId = lobbyChannel.id
 
-  // --- Member joined the lobby: create a temp room ---
+  // --- Member joined the lobby: create a public channel ---
   if (
     newState.channelId === lobbyId &&
     oldState.channelId !== lobbyId &&
     newState.member
   ) {
-    await createTempVoiceRoom(newState.member, lobbyChannel, guild, client)
+    await createPublicVoiceChannel(newState.member, lobbyChannel, guild, client)
     return
   }
 
-  // --- Member left a temp room: schedule deletion if empty ---
+  // --- Member left a tracked PUBLIC channel: schedule deletion if empty ---
   if (oldState.channelId && tempChannelsByLobby.get(lobbyId)?.has(oldState.channelId)) {
     scheduleTempChannelDeletion(oldState.channelId, client)
   }
 }
 
-async function createTempVoiceRoom(
-  member: any,
-  lobbyChannel: any,
-  guild: any,
-  client: Client
-): Promise<void> {
-  const category = lobbyChannel.parent as any
-  const channelName = `${TEMP_CHANNEL_PREFIX}${member.user.username}`
+export function registerVoiceStateEvents(client: Client): void {
+  client.on(Events.VoiceStateUpdate, (oldState: VoiceState, newState: VoiceState) => {
+    try {
+      void handleVoiceStateUpdate(oldState, newState, client)
+    } catch (error) {
+      logger.error({ error: String(error) }, 'Voice state update handler failed')
+    }
+  })
 
-  const tempChannel = await guild.channels.create({
-    name: channelName,
-    type: 2, // GuildVoice
-    parent: category,
-    topic: `Salon vocal temporaire créé par ${member.user.username} / Temporary voice room created by ${member.user.username}`,
-    reason: 'GTA VI MADAGASCAR — temporary live voice room',
-  }) as any
-
-  // Track the temp channel
-  const lobbyId = lobbyChannel.id
-  if (!tempChannelsByLobby.has(lobbyId)) tempChannelsByLobby.set(lobbyId, new Set())
-  tempChannelsByLobby.get(lobbyId)!.add(tempChannel.id)
-
-  // Move the member into the new room
-  try {
-    await member.voice.setChannel(tempChannel, 'Temporary live voice room created')
-  } catch (error) {
-    logger.error({ error: String(error), channel: tempChannel.id }, 'Failed to move member to temp voice room')
-  }
-
-  logger.info({ channel: tempChannel.id, user: member.user.id, guild: guild.id }, 'Temporary voice room created')
-
-  // When the temp channel becomes empty, start the deletion timer
-  tempChannel.on('voiceStateUpdate', (_oldState: VoiceState, newState: VoiceState) => {
-    if (newState.channelId === tempChannel.id && newState.member) return // someone joined
-    if (tempChannel.members.size === 0) {
-      scheduleTempChannelDeletion(tempChannel.id, client)
+  client.on(Events.ClientReady, (c) => {
+    for (const guild of c.guilds.cache.values()) {
+      try {
+        adoptExistingPublicChannels(guild, c)
+      } catch (error) {
+        logger.error({ error: String(error), guild: guild.id }, 'Failed to adopt existing public voice channels')
+      }
     }
   })
 }
 
-function scheduleTempChannelDeletion(
-  channelId: string,
-  client: Client
-): void {
-  const existing = deleteTimers.get(channelId)
-  if (existing) clearTimeout(existing)
-
-  deleteTimers.set(
-    channelId,
-    setTimeout(async () => {
-      deleteTimers.delete(channelId)
-
-      let channel: any
-      try {
-        channel = await client.channels.fetch(channelId)
-      } catch {
-        return
-      }
-      if (!channel) return
-
-      // Remove from tracking
-      for (const channels of tempChannelsByLobby.values()) {
-        if (channels.has(channelId)) {
-          channels.delete(channelId)
-          break
-        }
-      }
-
-      // Verify it's empty before deleting
-      if (channel.isVoiceBased() && channel.members.size > 0) return
-
-      try {
-        await channel.delete('Temporary voice room empty — auto-deleted')
-        logger.info({ channel: channelId }, 'Temporary voice room deleted (empty)')
-      } catch (error) {
-        logger.error({ error: String(error), channel: channelId }, 'Failed to delete temp voice room')
-      }
-    }, DELETE_AFTER_EMPTY_MS)
-  )
-}
-
-/** Expose for testing: clear tracking maps. */
+/** Clear all in-memory tracking and pending timers (testing only). */
 export function resetTempChannelTracking(): void {
   tempChannelsByLobby.clear()
+  channelNumberById.clear()
+  channelLobbyById.clear()
+  usedNumbersByLobby.clear()
   for (const timer of deleteTimers.values()) clearTimeout(timer)
   deleteTimers.clear()
 }
 
-/** Expose tracked temp channels for testing. */
+/** lobbyId => set of tracked temp channel ids. */
 export function getTrackedTempChannels(): Map<string, Set<string>> {
   return new Map(tempChannelsByLobby)
+}
+
+/** channelId => its PUBLIC number. */
+export function getChannelNumbers(): Map<string, number> {
+  return new Map(channelNumberById)
+}
+
+/** lobbyId => set of PUBLIC numbers currently in use. */
+export function getUsedNumbers(lobbyId: string): Set<number> {
+  return new Set(usedNumbersByLobby.get(lobbyId) ?? [])
 }
