@@ -72,7 +72,7 @@ function discordChannelType(type: ChannelDef['type']): ChannelType {
     case 'text': return ChannelType.GuildText
     case 'voice': return ChannelType.GuildVoice
     case 'stage': return ChannelType.GuildStageVoice
-    case 'news': return ChannelType.GuildNews
+    case 'news': return ChannelType.GuildText // Discord API rejects GuildNews (5) at creation; create as text, convert manually in Discord if Community server
   }
 }
 
