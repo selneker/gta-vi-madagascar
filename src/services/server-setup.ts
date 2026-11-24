@@ -104,7 +104,7 @@ export async function preview(guild: Guild): Promise<SetupPreview> {
   const channelPlans: ChannelPlan[] = []
   for (const def of sortChannels(Channels)) {
     const parent = def.category
-      ? existingChannels.find((c) => c?.name === categoryById(def.category!)?.name && c?.type === ChannelType.GuildCategory)
+      ? existingChannels.find((c) => c?.type === ChannelType.GuildCategory && c?.name.toUpperCase() === categoryById(def.category!)?.name.toUpperCase())
       : undefined
     const parentId = parent?.id ?? null
     const existing = existingChannels.find(
@@ -193,7 +193,7 @@ export async function apply(guild: Guild): Promise<SetupResult> {
   // --- Channels: categories first, then children (sorted by position) ---
   for (const def of sortChannels(Channels)) {
     const parent = def.category
-      ? existingChannels.find((c) => c?.name === categoryById(def.category!)?.name && c?.type === ChannelType.GuildCategory)
+      ? existingChannels.find((c) => c?.type === ChannelType.GuildCategory && c?.name.toUpperCase() === categoryById(def.category!)?.name.toUpperCase())
       : undefined
     const parentId = parent?.id ?? null
     let existing = existingChannels.find(
@@ -313,13 +313,26 @@ function stripStylePrefix(name: string): string {
 
 /**
  * Supprime les canaux en doublon dans chaque catégorie.
- * Deux canaux sont des doublons s'ils ont le même nom de base et la même catégorie.
+ * Deux canaux sont des doublons s'ils ont le même nom de base (préfixe de style ╭ㆍ│ㆍ╰ㆍ retiré)
+ * et la même catégorie. Le filtrage par catégorie utilise le nom de catégorie en majuscule
+ * (NOM_CATEGORIE) pour matcher le Discord avec la config.
  * On garde celui qui correspond exactement à un ChannelDef, sinon le premier trouvé.
  */
 export async function cleanupDuplicateChannels(
   guild: Guild,
   existingChannels: Collection<string, NonThreadGuildBasedChannel | null>,
 ): Promise<{ removed: number; kept: number }> {
+  // Map: ID de catégorie Discord → ChannelDef de config correspondant (match sur nom en majuscule)
+  const discordCategoryIdToConfigDef = new Map<string, ChannelDef>()
+  for (const [, channel] of existingChannels) {
+    if (!channel || channel.type !== ChannelType.GuildCategory) continue
+    const configDef = Channels.find(
+      (c) => c.type === 'category' && c.name.toUpperCase() === channel.name.toUpperCase(),
+    )
+    if (configDef) discordCategoryIdToConfigDef.set(channel.id, configDef)
+  }
+
+  // Groupe les canaux par leur catégorie parente (ID Discord)
   const channelsByCategory = new Map<string | null, NonThreadGuildBasedChannel[]>()
   for (const [, channel] of existingChannels) {
     if (!channel) continue
@@ -332,6 +345,11 @@ export async function cleanupDuplicateChannels(
   let kept = 0
 
   for (const [catId, group] of channelsByCategory) {
+    // Nom de catégorie en majuscule pour le filtrage (NOM_CATEGORIE)
+    const configCatDef = catId ? discordCategoryIdToConfigDef.get(catId) : undefined
+    const categoryName = configCatDef ? configCatDef.name.toUpperCase() : null
+
+    // Groupe par nom de base (préfixe de style retiré)
     const byBaseName = new Map<string, NonThreadGuildBasedChannel[]>()
     for (const channel of group) {
       const base = stripStylePrefix(channel.name)
@@ -345,10 +363,18 @@ export async function cleanupDuplicateChannels(
         continue
       }
 
-      // Cherche un def de config qui correspond exactement à ce nom de base dans cette catégorie
-      const def = Channels.find(
-        (c) => c.category === (catId ? categoryById(catId)?.id : undefined) && stripStylePrefix(c.name) === base,
-      )
+      // Cherche le ChannelDef qui correspond exactement à ce nom de base dans cette catégorie
+      const def = configCatDef
+        ? Channels.find(
+            (c) => c.type !== 'category'
+              && c.category === configCatDef.id
+              && stripStylePrefix(c.name) === base,
+          )
+        : Channels.find(
+            (c) => c.type !== 'category'
+              && !c.category
+              && stripStylePrefix(c.name) === base,
+          )
       const exactMatch = def ? duplicates.find((c) => c.name === def.name) : undefined
       const keeper = exactMatch ?? duplicates[0]
 
@@ -358,9 +384,9 @@ export async function cleanupDuplicateChannels(
         try {
           await channel.delete('Doublon supprimé — /setup cleanup')
           removed++
-          logger.info({ channel: channel.id, name: channel.name, guild: guild.id }, 'Duplicate channel deleted')
+          logger.info({ channel: channel.id, name: channel.name, category: categoryName, guild: guild.id }, 'Duplicate channel deleted')
         } catch (error) {
-          logger.error({ channel: channel.id, name: channel.name, error: String(error) }, 'Failed to delete duplicate channel')
+          logger.error({ channel: channel.id, name: channel.name, category: categoryName, error: String(error) }, 'Failed to delete duplicate channel')
         }
       }
       kept++
