@@ -9,7 +9,17 @@ export const data = new SlashCommandBuilder()
   .addSubcommand((sub) => sub.setName('preview').setDescription("Preview structural changes without applying them"))
   .addSubcommand((sub) => sub.setName('apply').setDescription('Apply the configured server structure (idempotent)'))
   .addSubcommand((sub) => sub.setName('audit').setDescription('Audit the current guild against the desired configuration'))
-  .addSubcommand((sub) => sub.setName('cleanup').setDescription('Supprime les salons en doublon dans chaque catégorie'))
+  .addSubcommand((sub) =>
+    sub
+      .setName('cleanup')
+      .setDescription('Supprime les salons en doublon (dry-run par défaut)')
+      .addBooleanOption((opt) =>
+        opt
+          .setName('dry-run')
+          .setDescription('Ne rien supprimer — afficher seulement ce qui serait supprimé (défaut: true)')
+          .setRequired(false)
+      )
+  )
   // /setup is an administration action: restrict to server administrators.
   .setDefaultMemberPermissions(PermissionBits.ADMINISTRATOR)
 
@@ -26,11 +36,15 @@ export async function execute(
   const subcommand = interaction.options.getSubcommand(true)
 
   let result: any
+  let dryRun = true
   try {
     if (subcommand === 'preview') result = await previewSetup(interaction.guild)
     else if (subcommand === 'apply') result = await applySetup(interaction.guild)
-    else if (subcommand === 'cleanup') result = await cleanupSetup(interaction.guild)
-    else result = await auditSetup(interaction.guild)
+    else if (subcommand === 'cleanup') {
+      dryRun = interaction.options.getBoolean('dry-run') ?? true
+      result = await cleanupSetup(interaction.guild, dryRun)
+      result.dryRun = dryRun
+    } else result = await auditSetup(interaction.guild)
   } catch (error) {
     deps.logger.error({ subcommand, error: String(error) }, 'setup command failed')
     await interaction.editReply({ content: 'Échec de /setup / /setup command failed: check bot-logs.' })
@@ -55,10 +69,14 @@ function buildEmbed(subcommand: string, result: any): EmbedBuilder {
       )
     if (result.warnings.length) embed.addFields({ name: 'Avertissements', value: result.warnings.join('\n') })
   } else if (subcommand === 'cleanup') {
+    const verb = result.dryRun ? 'Seraient supprimés' : 'Supprimés'
     embed.addFields(
-      { name: 'Supprimés', value: `${result.removed} salon(s) en doublon`, inline: true },
+      { name: verb, value: `${result.removed} salon(s) en doublon`, inline: true },
       { name: 'Conservés', value: `${result.kept} salon(s)`, inline: true }
     )
+    if (result.dryRun) {
+      embed.setFooter({ text: 'Dry run — relancez avec dry-run:false pour supprimer réellement.' })
+    }
   } else {
     const roleCounts: Record<'create' | 'update' | 'unchanged', number> = { create: 0, update: 0, unchanged: 0 }
     const channelCounts: Record<'create' | 'update' | 'unchanged', number> = { create: 0, update: 0, unchanged: 0 }

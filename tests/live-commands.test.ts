@@ -41,6 +41,7 @@ import {
   handleStreamerApplyModal,
 } from '@/src/commands/streamer.js'
 import { buildLivePanelEmbed } from '@/src/services/live-announcements.js'
+import { channelCache, guildRoleCache, memberRoleCache } from './helpers/discord.js'
 
 /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
    Mock helpers
@@ -49,28 +50,31 @@ import { buildLivePanelEmbed } from '@/src/services/live-announcements.js'
 function makeMember(roleIds: string[] = []) {
   return {
     id: 'user-1',
-    roles: { cache: new Map(roleIds.map((id) => [id, { id }])) },
+    guild: { id: 'guild-1' },
+    roles: { cache: memberRoleCache(roleIds) },
   } as any
 }
 
 function makeGuild(roleIds: string[] = [], channelNames: string[] = []) {
+  void roleIds
   return {
     id: 'guild-1',
-    roles: { cache: new Map(roleIds.map((id) => [id, { id }])) },
+    roles: { cache: guildRoleCache() },
     channels: {
-      cache: new Map(
-        channelNames.map((name) => [name, { id: `ch-${name}`, name, type: 0, isTextBased: () => true }])
-      ),
+      cache: channelCache(channelNames),
     },
     members: { cache: new Map() },
   } as any
 }
 
 function makeInteraction(subcommand: string, memberRoles: string[] = [], options: Record<string, any> = {}) {
+  const guild = makeGuild(memberRoles)
+  const member = makeMember(memberRoles)
+  member.guild = guild
   return {
     inGuild: () => true,
-    guild: makeGuild(memberRoles),
-    member: makeMember(memberRoles),
+    guild,
+    member,
     user: { id: 'user-1' },
     options: {
       getSubcommand: () => subcommand,
@@ -154,10 +158,16 @@ describe('/live start', () => {
     await liveExecute(interaction, { db: {} as any, logger: console })
     expect(interaction.reply).toHaveBeenCalledWith(
       expect.objectContaining({
-        content: expect.stringContaining('Seuls les directeurs live'),
+        content: expect.stringContaining('Prenez le rôle **Streamer**'),
         ephemeral: true,
       })
     )
+  })
+
+  it('opens a modal for the self-assignable Streamer role', async () => {
+    const interaction = makeInteraction('start', ['role_streamer'])
+    await liveExecute(interaction, { db: {} as any, logger: console })
+    expect(interaction.showModal).toHaveBeenCalled()
   })
 
   it('opens a modal for authorized users', async () => {

@@ -15,6 +15,7 @@ import {
   submitSuggestion,
 } from '../services/community-center.js'
 import { logger } from '../lib/logger.js'
+import { resolveChannel } from '../lib/resolve.js'
 
 export const data = new SlashCommandBuilder()
   .setName('community')
@@ -129,10 +130,6 @@ export async function execute(
 /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
    Helpers
    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
-
-function findChannelByName(cache: any, name: string): any {
-  return [...cache.values()].find((c: any) => c.name === name)
-}
 
 /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
    /community profile
@@ -249,7 +246,7 @@ async function handleTicket(
   if (action === 'open') {
     await interaction.deferReply({ ephemeral: true })
     const typeRaw = interaction.options.getString('type') || 'SUPPORT'
-    const ticketChannel = findChannelByName(guild.channels.cache, '🎫・create-ticket')
+    const ticketChannel = resolveChannel(guild, 'ch_create_ticket')
     if (!ticketChannel) {
       await interaction.editReply({ content: 'Salon de tickets introuvable / Ticket channel not found.' })
       return
@@ -287,7 +284,7 @@ async function handleSuggest(interaction: ChatInputCommandInteraction, guild: an
 
   await submitSuggestion(guild.id, interaction.user.id, title, description)
 
-  const suggestChannel = findChannelByName(guild.channels.cache, '💡・suggestions')
+  const suggestChannel = resolveChannel(guild, 'ch_suggestions')
   if (suggestChannel && suggestChannel.isTextBased?.()) {
     await (suggestChannel as TextChannel).send({
       embeds: [

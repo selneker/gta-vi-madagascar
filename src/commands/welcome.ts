@@ -12,6 +12,7 @@ import {
   GuildMember,
 } from 'discord.js'
 import { logger } from '../lib/logger.js'
+import { resolveRole } from '../lib/resolve.js'
 import { updateProfile } from '../services/community-center.js'
 
 /** Custom ID du bouton qui ouvre le modal de sondage d'accueil. */
@@ -23,7 +24,7 @@ export const roleSelectCustomId = 'welcome:roles'
 /** Custom ID du modal de sondage d'accueil. */
 export const welcomeSurveyModalCustomId = 'welcome:survey:modal'
 
-/** Rôles auto-assignables proposés aux nouveaux membres. */
+/** Rôles auto-assignables proposés aux nouveaux membres (ids = clés de config, résolues par nom). */
 const AUTO_ROLES: { id: string; name: string; label: string; emoji?: string }[] = [
   { id: 'role_lang_mg', name: 'Malagasy', label: 'Malagasy (🇲🇬)', emoji: '🇲🇬' },
   { id: 'role_lang_fr', name: 'French', label: 'French (🇫🇷)', emoji: '🇫🇷' },
@@ -31,6 +32,7 @@ const AUTO_ROLES: { id: string; name: string; label: string; emoji?: string }[] 
   { id: 'role_playstation', name: 'PlayStation', label: 'PlayStation', emoji: '🎮' },
   { id: 'role_xbox', name: 'Xbox', label: 'Xbox', emoji: '⏹️' },
   { id: 'role_pc', name: 'PC', label: 'PC', emoji: '🖥️' },
+  { id: 'role_streamer', name: 'Streamer', label: 'Streamer (go live)', emoji: '📺' },
   { id: 'role_live_alerts', name: 'Live Alerts', label: 'Alertes Live', emoji: '🔴' },
 ]
 
@@ -116,18 +118,18 @@ export async function handleWelcomeSurveyButton(
     .setRequired(true)
     .setMaxLength(30)
 
-  const rechercheInput = new TextInputBuilder()
-    .setCustomId('welcome:recherche')
-    .setLabel('Ce que tu cherches sur le serveur')
+  const langueInput = new TextInputBuilder()
+    .setCustomId('welcome:langue')
+    .setLabel('Ta langue / Your language')
     .setStyle(TextInputStyle.Short)
-    .setPlaceholder('Lives, équipes, news GTA VI, discussions...')
+    .setPlaceholder('malagasy / french / english')
     .setRequired(true)
-    .setMaxLength(100)
+    .setMaxLength(20)
 
   modal.addComponents(
     new ActionRowBuilder<TextInputBuilder>().addComponents(pseudoInput),
     new ActionRowBuilder<TextInputBuilder>().addComponents(plateformeInput),
-    new ActionRowBuilder<TextInputBuilder>().addComponents(rechercheInput),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(langueInput),
   )
 
   await interaction.showModal(modal)
@@ -142,29 +144,71 @@ export async function handleWelcomeSurveyModal(
   deps: { db: unknown; logger: typeof logger },
 ): Promise<void> {
   const pseudo = interaction.fields.getTextInputValue('welcome:pseudo')
-  const plateforme = interaction.fields.getTextInputValue('welcome:plateforme')
-  const recherche = interaction.fields.getTextInputValue('welcome:recherche')
+  const plateformeRaw = interaction.fields.getTextInputValue('welcome:plateforme')
+  const langueRaw = interaction.fields.getTextInputValue('welcome:langue')
 
   const userId = interaction.user.id
   const guildId = interaction.guild?.id
 
+  const platformMap: Record<string, { label: string; role: string }> = {
+    playstation: { label: 'PlayStation', role: 'role_playstation' },
+    ps: { label: 'PlayStation', role: 'role_playstation' },
+    ps5: { label: 'PlayStation', role: 'role_playstation' },
+    xbox: { label: 'Xbox', role: 'role_xbox' },
+    pc: { label: 'PC', role: 'role_pc' },
+  }
+  const languageMap: Record<string, 'MALAGASY' | 'FRENCH' | 'ENGLISH'> = {
+    malagasy: 'MALAGASY',
+    mg: 'MALAGASY',
+    french: 'FRENCH',
+    fr: 'FRENCH',
+    english: 'ENGLISH',
+    en: 'ENGLISH',
+  }
+  const platform = platformMap[plateformeRaw.toLowerCase().trim()]
+  const language = languageMap[langueRaw.toLowerCase().trim()]
+
+  if (!platform || !language) {
+    await interaction.reply({
+      content:
+        'Plateforme ou langue invalide. Utilise PlayStation, Xbox ou PC, et malagasy, french ou english. / Invalid platform or language.',
+      ephemeral: true,
+    })
+    return
+  }
+
   try {
     if (guildId) {
       await updateProfile(userId, guildId, {
-        bio: `Pseudo GTA: ${pseudo} | Plateforme: ${plateforme} | Recherche: ${recherche}`,
-        platform: plateforme,
+        bio: `Pseudo GTA: ${pseudo} | Plateforme: ${platform.label}`,
+        platform: platform.label,
+        language,
       })
     }
   } catch (error) {
     deps.logger.error({ userId, guildId, error: String(error) }, 'Welcome survey profile update failed')
   }
 
+  // Grant the platform role right away, so the member does not have to pick it again.
+  let platformGranted = false
+  try {
+    const guild = interaction.guild
+    const member = interaction.member
+    const role = guild && member ? resolveRole(guild, platform.role) : undefined
+    if (role && member && !member.roles.cache.has(role.id)) {
+      await member.roles.add(role, 'Welcome survey')
+      platformGranted = true
+    }
+  } catch (error) {
+    deps.logger.error({ userId, error: String(error) }, 'Welcome survey platform role failed')
+  }
+
   await interaction.reply({
     content:
-      'Merci pour tes réponses ! Ton profil a été mis à jour.\n' +
-      'N\'oublie pas de choisir tes rôles avec le sélecteur ci-dessus.\n\n' +
-      'Thank you for your answers! Your profile has been updated.\n' +
-      "Don't forget to pick your roles with the selector above.",
+      `Merci ${pseudo} ! Profil mis à jour (${platform.label}, ${language}).` +
+      (platformGranted ? ` Rôle ${platform.label} ajouté.` : '') +
+      '\nN\'oublie pas de choisir tes autres rôles avec le sélecteur ci-dessus.\n\n' +
+      'Thank you! Your profile is updated. Pick your other roles with the selector above.',
     ephemeral: true,
   })
 }
@@ -185,26 +229,17 @@ export async function handleRoleSelect(
     return
   }
 
-  const guildRoles = await guild.roles.fetch()
+  await guild.roles.fetch()
 
   const toAdd: Role[] = []
   const toRemove: Role[] = []
 
-  // Rôles actuellement détenus par le membre parmi les rôles auto-assignables
-  const currentIds = new Set(
-    member.roles.cache
-      .filter((r) => AUTO_ROLES.some((ar) => ar.id === r.id))
-      .map((r) => r.id),
-  )
-
-  for (const roleId of AUTO_ROLES.map((r) => r.id)) {
-    const role = guildRoles.get(roleId)
+  for (const auto of AUTO_ROLES) {
+    const role = resolveRole(guild, auto.id)
     if (!role) continue
-    if (selectedValues.includes(roleId)) {
-      if (!currentIds.has(roleId)) toAdd.push(role)
-    } else {
-      if (currentIds.has(roleId)) toRemove.push(role)
-    }
+    const hasRole = member.roles.cache.has(role.id)
+    if (selectedValues.includes(auto.id) && !hasRole) toAdd.push(role)
+    if (!selectedValues.includes(auto.id) && hasRole) toRemove.push(role)
   }
 
   try {

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { Collection } from 'discord.js'
 import {
   adoptExistingPublicChannels,
   createPublicVoiceChannel,
@@ -49,27 +50,26 @@ function makeGuildAndLobby() {
   }
   lobby.parent.children.cache.set(lobby.id, lobby)
 
+  const channelCache = new Collection<string, any>([[lobby.id, lobby]])
+
   const guild = {
     id: 'guild-1',
     roles: { everyone: { id: 'role-everyone' } },
     channels: {
-      cache: {
-        find: (fn: any) => {
-          if (fn(lobby)) return lobby
-          return created.find(fn) ?? undefined
-        },
-      },
+      cache: channelCache,
       create: vi.fn(async (opts: any) => {
         const id = `vc-${++channelCounter}`
         const ch: any = {
           id,
           name: opts.name,
+          parentId: opts.parent?.id ?? null,
           members: { size: 0 },
           delete: vi.fn(async () => {}),
           on: vi.fn(),
           isVoiceBased: () => true,
         }
         created.push(ch)
+        channelCache.set(ch.id, ch)
         return ch
       }),
     },

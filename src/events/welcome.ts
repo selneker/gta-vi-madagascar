@@ -1,5 +1,6 @@
-import { Client, Events, GuildMember, ChannelType } from 'discord.js'
+import { Client, Events, GuildMember } from 'discord.js'
 import { logger } from '../lib/logger.js'
+import { resolveChannel } from '../lib/resolve.js'
 import { buildWelcomeEmbed, buildWelcomeComponents } from '../commands/welcome.js'
 
 /**
@@ -12,9 +13,7 @@ export function registerWelcomeEvents(client: Client): void {
     if (member.user.bot) return
 
     const guild = member.guild
-    const welcomeChannel = guild.channels.cache.find(
-      (c) => c.type === ChannelType.GuildText && c.name === '╭ㆍwelcome',
-    )
+    const welcomeChannel = resolveChannel(guild, 'ch_welcome')
 
     if (!welcomeChannel || !welcomeChannel.isTextBased?.()) {
       logger.warn({ guild: guild.id }, 'Welcome channel not found; skipping welcome message')

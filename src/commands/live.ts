@@ -11,6 +11,7 @@ import {
   TextChannel,
   NewsChannel,
   GuildMember,
+  Guild,
 } from 'discord.js'
 import {
   createLiveSession,
@@ -21,26 +22,16 @@ import {
   type LiveStartData,
 } from '../services/live-center.js'
 import { postLiveStartAnnouncement, postLiveEndAnnouncement, buildLivePanelEmbed } from '../services/live-announcements.js'
+import { resolveChannel, resolveRole, hasAnyConfigRole } from '../lib/resolve.js'
 import { logger } from '../lib/logger.js'
 
-/** Roles allowed to start/manage a live session. */
+/** Roles allowed to start/manage a live session. Streamer is self-assignable. */
 const LIVE_MANAGE_ROLE_IDS = [
   'role_live_director',
   'role_stage_mod',
   'role_live_host',
   'role_verified_streamer',
-]
-
-/** Roles allowed to schedule/cancel lives (admin-ish). */
-const LIVE_ADMIN_ROLE_IDS = [
-  'role_live_director',
-  'role_stage_mod',
-  'role_head_mod',
-  'role_moderator',
-  'role_administrator',
-  'role_community_manager',
-  'role_founder',
-  'role_cofounder',
+  'role_streamer',
 ]
 
 export const data = new SlashCommandBuilder()
@@ -63,12 +54,6 @@ export const data = new SlashCommandBuilder()
   )
   .addSubcommand((sub) =>
     sub.setName('end').setDescription('Terminer le live en cours / End the current live stream')
-  )
-  .addSubcommand((sub) =>
-    sub.setName('schedule').setDescription('Programmer un live / Schedule a live stream')
-  )
-  .addSubcommand((sub) =>
-    sub.setName('cancel').setDescription('Annuler un live / Cancel a live stream')
   )
   .addSubcommand((sub) =>
     sub.setName('list').setDescription('Lister les lives / List live streams')
@@ -110,12 +95,6 @@ export async function execute(
       case 'end':
         await handleEnd(interaction, guild, member)
         break
-      case 'schedule':
-        await handleSchedule(interaction, guild)
-        break
-      case 'cancel':
-        await handleCancel(interaction, guild)
-        break
       case 'list':
         await handleList(interaction, guild)
         break
@@ -140,37 +119,6 @@ export async function execute(
 }
 
 /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-   Helpers
-   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
-
-function hasAnyRole(member: GuildMember, roleIds: string[]): boolean {
-  return roleIds.some((id) => member.roles.cache.has(id))
-}
-
-function requireRole(interaction: ChatInputCommandInteraction, roleIds: string[]): boolean {
-  const member = interaction.member
-  if (!member || !(member as GuildMember).roles.cache) {
-    void interaction.reply({
-      content: 'Vous n’avez pas le rôle requis pour cette action / You do not have the required role for this action.',
-      ephemeral: true,
-    })
-    return false
-  }
-  if (!hasAnyRole(member as GuildMember, roleIds)) {
-    void interaction.reply({
-      content: 'Vous n’avez pas le rôle requis pour cette action / You do not have the required role for this action.',
-      ephemeral: true,
-    })
-    return false
-  }
-  return true
-}
-
-function findChannelByName(cache: any, name: string): any {
-  return [...cache.values()].find((c: any) => c.name === name)
-}
-
-/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
    /live panel
    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
 
@@ -185,9 +133,9 @@ async function handlePanel(interaction: ChatInputCommandInteraction): Promise<vo
    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
 
 async function handleStart(interaction: ChatInputCommandInteraction): Promise<void> {
-  if (!hasAnyRole(interaction.member as GuildMember, LIVE_MANAGE_ROLE_IDS)) {
+  if (!hasAnyConfigRole(interaction.guild!, interaction.member as GuildMember, LIVE_MANAGE_ROLE_IDS)) {
     await interaction.reply({
-      content: 'Seuls les directeurs live, animateurs, modérateurs de scène et streameurs vérifiés peuvent démarrer un live / Only Live Directors, Hosts, Stage Moderators and Verified Streamers can start a live.',
+      content: 'Prenez le rôle **Streamer** dans #choose-your-roles pour diffuser (ou demandez à un responsable Live). / Take the Streamer role in #choose-your-roles to go live, or ask a Live manager.',
       ephemeral: true,
     })
     return
@@ -269,7 +217,7 @@ async function handleEnd(
   }
 
   const isHost = active.hostId === member.id
-  const canManage = hasAnyRole(member, LIVE_MANAGE_ROLE_IDS)
+  const canManage = hasAnyConfigRole(guild, member, LIVE_MANAGE_ROLE_IDS)
   if (!isHost && !canManage) {
     await interaction.editReply({
       content: 'Seul l’hôte du live ou un responsable Live peut terminer ce live / Only the live host or a Live manager can end this stream.',
@@ -280,7 +228,7 @@ async function handleEnd(
   const ended = await endLiveSession(active.id)
 
   // Post end announcement
-  const announcementChannel = findChannelByName(guild.channels.cache, '📢・live-announcements')
+  const announcementChannel = resolveChannel(guild, 'ch_live_announcements')
   if (announcementChannel && announcementChannel.isTextBased?.()) {
     try {
       await postLiveEndAnnouncement(announcementChannel as TextChannel | NewsChannel, {
@@ -310,32 +258,6 @@ async function handleEnd(
         )
         .setTimestamp()
     ],
-  })
-}
-
-/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-   /live schedule
-   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
-
-async function handleSchedule(interaction: ChatInputCommandInteraction, _guild: any): Promise<void> {
-  if (!requireRole(interaction, LIVE_ADMIN_ROLE_IDS)) return
-
-  await interaction.deferReply({ ephemeral: true })
-  await interaction.editReply({
-    content: 'La programmation via événements Discord programmés sera configurée prochainement. Utilisez /live start pour diffuser maintenant. / Scheduled events setup coming soon. Use /live start to go live now.',
-  })
-}
-
-/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-   /live cancel
-   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
-
-async function handleCancel(interaction: ChatInputCommandInteraction, _guild: any): Promise<void> {
-  if (!requireRole(interaction, LIVE_ADMIN_ROLE_IDS)) return
-
-  await interaction.deferReply({ ephemeral: true })
-  await interaction.editReply({
-    content: 'Fournissez un ID de session pour annuler / Provide a session ID to cancel. (coming soon)',
   })
 }
 
@@ -492,13 +414,10 @@ export async function handleLiveStartModal(
     const session = await createLiveSession(guildId, hostId, data)
 
     // Post start announcement
-    const guild = interaction.guild as {
-      channels: { cache: any }
-      roles: { cache: any }
-    }
-    const announcementChannel = guild.channels.cache.find((c: any) => c.name === '📢・live-announcements')
+    const guild = interaction.guild as Guild
+    const announcementChannel = resolveChannel(guild, 'ch_live_announcements')
     if (announcementChannel && announcementChannel.isTextBased?.()) {
-      const liveAlertsRole = guild.roles.cache.find((r: any) => r.name === 'Live Alerts')
+      const liveAlertsRole = resolveRole(guild, 'role_live_alerts')
       await postLiveStartAnnouncement(
         announcementChannel as TextChannel | NewsChannel,
         {

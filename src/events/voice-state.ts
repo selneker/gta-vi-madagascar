@@ -8,6 +8,7 @@ import {
 } from 'discord.js'
 import { logger } from '../lib/logger.js'
 import { db } from '../lib/db.js'
+import { resolveChannel } from '../lib/resolve.js'
 
 /**
  * Join-to-Create public voice channels.
@@ -18,8 +19,6 @@ import { db } from '../lib/db.js'
  */
 
 /** The pre-existing Join-to-Create lobby. Never recreated by this module. */
-const LOBBY_CHANNEL_NAME = '🔴・CREATE YOUR LIVE ROOM'
-
 /** Name of an auto-created public voice channel: PUBLIC 1, PUBLIC 2, ... */
 const publicChannelName = (n: number): string => `PUBLIC ${n}`
 
@@ -59,9 +58,8 @@ function enqueueCreate<T>(task: () => Promise<T>): Promise<T> {
 }
 
 function getLobbyChannel(guild: Guild): any {
-  return guild.channels.cache.find(
-    (c) => c.type === ChannelType.GuildVoice && c.name === LOBBY_CHANNEL_NAME
-  )
+  const lobby = resolveChannel(guild, 'ch_live_lobby')
+  return lobby?.type === ChannelType.GuildVoice ? lobby : undefined
 }
 
 function nextFreeNumber(lobbyId: string): number {

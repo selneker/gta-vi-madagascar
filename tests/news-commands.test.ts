@@ -43,6 +43,7 @@ import {
   execute as newsExecute,
 } from '@/src/commands/news.js'
 import { buildNewsPublishEmbed, buildNewsReviewEmbed } from '@/src/services/news-announcements.js'
+import { channelCache, guildRoleCache, memberRoleCache } from './helpers/discord.js'
 
 /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
    Mock helpers
@@ -51,28 +52,31 @@ import { buildNewsPublishEmbed, buildNewsReviewEmbed } from '@/src/services/news
 function makeMember(roleIds: string[] = []) {
   return {
     id: 'user-1',
-    roles: { cache: new Map(roleIds.map((id) => [id, { id }])) },
+    guild: { id: 'guild-1' },
+    roles: { cache: memberRoleCache(roleIds) },
   } as any
 }
 
 function makeGuild(roleIds: string[] = [], channelNames: string[] = []) {
+  void roleIds
   return {
     id: 'guild-1',
-    roles: { cache: new Map(roleIds.map((id) => [id, { id }])) },
+    roles: { cache: guildRoleCache() },
     channels: {
-      cache: new Map(
-        channelNames.map((name) => [name, { id: `ch-${name}`, name, type: 0, isTextBased: () => true }])
-      ),
+      cache: channelCache(channelNames),
     },
     members: { cache: new Map() },
   } as any
 }
 
 function makeInteraction(subcommand: string, memberRoles: string[] = [], options: Record<string, any> = {}) {
+  const guild = makeGuild(memberRoles)
+  const member = makeMember(memberRoles)
+  member.guild = guild
   return {
     inGuild: () => true,
-    guild: makeGuild(memberRoles),
-    member: makeMember(memberRoles),
+    guild,
+    member,
     user: { id: 'user-1' },
     options: {
       getSubcommand: () => subcommand,

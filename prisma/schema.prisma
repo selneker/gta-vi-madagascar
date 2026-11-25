@@ -198,7 +198,7 @@ model MemberProfile {
 
 model StreamerApplication {
   id             String                   @id @default(cuid())
-  userId         String   @unique
+  userId         String
   guildId        String
   status         StreamerApplicationStatus @default(PENDING)
   platform       String
@@ -213,6 +213,7 @@ model StreamerApplication {
 
   guild GuildConfiguration @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
 
+  @@unique([guildId, userId])
   @@index([guildId, status])
   @@map("streamer_applications")
 }

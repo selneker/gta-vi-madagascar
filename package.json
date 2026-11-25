@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "GTA VI MADAGASCAR — Discord Live Center & Newsroom community ecosystem (Malagasy / French / English)",
   "private": true,
+  "license": "AGPL-3.0-only",
   "engines": {
     "node": ">=22.12.0"
   },
@@ -12,6 +13,7 @@
     "build": "tsc",
     "test": "vitest run",
     "test:watch": "vitest",
+    "maintenance": "tsx scripts/live-maintenance.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate:dev": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",

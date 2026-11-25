@@ -11,6 +11,7 @@ import {
   GuildMember,
 } from 'discord.js'
 import { db } from '../lib/db.js'
+import { resolveChannel, resolveRole, hasAnyConfigRole } from '../lib/resolve.js'
 import { logger } from '../lib/logger.js'
 
 /** Roles allowed to approve/reject streamer applications. */
@@ -105,12 +106,14 @@ export async function execute(
    Helpers
    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
 
-function hasAnyRole(member: GuildMember, roleIds: string[]): boolean {
-  return roleIds.some((id) => member.roles.cache.has(id))
+/** Applications can be resubmitted after a rejection. */
+function isResubmittable(status: string | undefined): boolean {
+  return status === 'REJECTED'
 }
 
-function findChannelByName(cache: any, name: string): any {
-  return [...cache.values()].find((c: any) => c.name === name)
+/** Splits the comma-separated games field into the String[] the schema expects. */
+function parseGames(raw: string): string[] {
+  return raw.split(',').map((g) => g.trim()).filter((g) => g.length > 0).slice(0, 10)
 }
 
 /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -118,8 +121,11 @@ function findChannelByName(cache: any, name: string): any {
    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
 
 async function handleApply(interaction: ChatInputCommandInteraction): Promise<void> {
-  const existing = await db.streamerApplication.findUnique({ where: { userId: interaction.user.id } })
-  if (existing) {
+  const guildId = interaction.guildId!
+  const existing = await db.streamerApplication.findUnique({
+    where: { guildId_userId: { guildId, userId: interaction.user.id } },
+  })
+  if (existing && !isResubmittable(existing.status)) {
     await interaction.reply({
       content: `Vous avez déjà une candidature en cours (statut: ${existing.status}) / You already have an application (status: ${existing.status}).`,
       ephemeral: true,
@@ -197,7 +203,7 @@ async function handleApprove(
   guild: any,
   member: GuildMember
 ): Promise<void> {
-  if (!hasAnyRole(member, STREAMER_MOD_ROLE_IDS)) {
+  if (!hasAnyConfigRole(guild, member, STREAMER_MOD_ROLE_IDS)) {
     await interaction.reply({
       content: 'Vous n’avez pas le rôle requis pour cette action / You do not have the required role for this action.',
       ephemeral: true,
@@ -215,14 +221,16 @@ async function handleApprove(
 
   const note = interaction.options.getString('note') || undefined
 
-  const existing = await db.streamerApplication.findUnique({ where: { userId: targetUser.id } })
+  const existing = await db.streamerApplication.findUnique({
+    where: { guildId_userId: { guildId: guild.id, userId: targetUser.id } },
+  })
   if (!existing || existing.status !== 'PENDING') {
     await interaction.editReply({ content: 'Aucune candidature en attente pour cet utilisateur / No pending application for this user.' })
     return
   }
 
   await db.streamerApplication.update({
-    where: { userId: targetUser.id },
+    where: { guildId_userId: { guildId: guild.id, userId: targetUser.id } },
     data: {
       status: 'APPROVED',
       reviewedBy: interaction.user.id,
@@ -230,9 +238,9 @@ async function handleApprove(
     },
   })
 
-  // Award Verified Streamer role if it exists. Resolve the member over REST:
-  // the GuildMembers intent is not requested, so the member cache is partial.
-  const verifiedRole = findChannelByName(guild.roles.cache, 'Verified Streamer')
+  // Award the Verified Streamer badge. Resolve the member over REST:
+  // the GuildMembers intent is partial for members who left the cache.
+  const verifiedRole = resolveRole(guild, 'role_verified_streamer')
   const targetMember = await guild.members.fetch(targetUser.id).catch(() => null)
   if (verifiedRole && targetMember) {
     try {
@@ -267,7 +275,7 @@ async function handleReject(
   guild: any,
   member: GuildMember
 ): Promise<void> {
-  if (!hasAnyRole(member, STREAMER_MOD_ROLE_IDS)) {
+  if (!hasAnyConfigRole(guild, member, STREAMER_MOD_ROLE_IDS)) {
     await interaction.reply({
       content: 'Vous n’avez pas le rôle requis pour cette action / You do not have the required role for this action.',
       ephemeral: true,
@@ -285,14 +293,16 @@ async function handleReject(
 
   const note = interaction.options.getString('note') || undefined
 
-  const existing = await db.streamerApplication.findUnique({ where: { userId: targetUser.id } })
+  const existing = await db.streamerApplication.findUnique({
+    where: { guildId_userId: { guildId: guild.id, userId: targetUser.id } },
+  })
   if (!existing || existing.status !== 'PENDING') {
     await interaction.editReply({ content: 'Aucune candidature en attente pour cet utilisateur / No pending application for this user.' })
     return
   }
 
   await db.streamerApplication.update({
-    where: { userId: targetUser.id },
+    where: { guildId_userId: { guildId: guild.id, userId: targetUser.id } },
     data: {
       status: 'REJECTED',
       reviewedBy: interaction.user.id,
@@ -325,7 +335,9 @@ async function handleProfile(interaction: ChatInputCommandInteraction): Promise<
 
   const targetUser = interaction.options.getUser('utilisateur') ?? interaction.user
 
-  const application = await db.streamerApplication.findUnique({ where: { userId: targetUser.id } })
+  const application = await db.streamerApplication.findUnique({
+    where: { guildId_userId: { guildId: interaction.guildId!, userId: targetUser.id } },
+  })
   const profile = await db.memberProfile.findUnique({ where: { userId: targetUser.id } })
 
   const embed = new EmbedBuilder()
@@ -419,9 +431,17 @@ export async function handleStreamerApplyModal(
 
   const guildId = interaction.guildId
   const userId = interaction.user.id
+  if (!guildId) {
+    await interaction.editReply({
+      content: 'Cette candidature doit être envoyée depuis un serveur / This application must be submitted from a server.',
+    })
+    return
+  }
 
-  const existing = await db.streamerApplication.findUnique({ where: { userId } })
-  if (existing) {
+  const existing = await db.streamerApplication.findUnique({
+    where: { guildId_userId: { guildId, userId } },
+  })
+  if (existing && !isResubmittable(existing.status)) {
     await interaction.editReply({
       content: `Vous avez déjà une candidature (statut: ${existing.status}) / You already have an application (status: ${existing.status}).`,
     })
@@ -429,26 +449,27 @@ export async function handleStreamerApplyModal(
   }
 
   try {
-    const application = await db.streamerApplication.create({
-      data: {
-        userId,
-        guildId,
-        platform,
-        games,
-        language,
-        channelUrl,
-        introduction,
-        status: 'PENDING',
-      },
-    })
+    const data = {
+      guildId,
+      platform,
+      games: parseGames(games),
+      language,
+      channelUrl,
+      introduction,
+      status: 'PENDING' as const,
+    }
+    const application = existing
+      ? await db.streamerApplication.update({
+          where: { guildId_userId: { guildId, userId } },
+          data,
+        })
+      : await db.streamerApplication.create({ data: { userId, ...data } })
 
     logger.info({ application: application.id, userId, guildId }, 'Streamer application submitted')
 
-    // Notify staff in #news-review
-    const guild = interaction.guild as {
-      channels: { cache: any }
-    }
-    const reviewChannel = guild.channels.cache.find((c: any) => c.name === '📰・news-review')
+    // Notify staff in the configured review channel (#news-review)
+    const guild = interaction.guild
+    const reviewChannel = guild ? resolveChannel(guild, 'ch_news_review') : undefined
     if (reviewChannel && reviewChannel.isTextBased?.()) {
       const embed = new EmbedBuilder()
         .setTitle('📝 Nouvelle candidature streameur / New Streamer Application')
@@ -456,7 +477,7 @@ export async function handleStreamerApplyModal(
         .addFields(
           { name: 'Utilisateur / User', value: `<@${userId}>`, inline: true },
           { name: 'Plateforme / Platform', value: platform, inline: true },
-          { name: 'Jeux / Games', value: games, inline: true },
+          { name: 'Jeux / Games', value: data.games.join(', ') || '—', inline: true },
           { name: 'Langue / Language', value: language, inline: true },
           { name: 'Chaîne / Channel', value: channelUrl, inline: true },
           { name: 'Présentation / Introduction', value: introduction.slice(0, 1000), inline: false }

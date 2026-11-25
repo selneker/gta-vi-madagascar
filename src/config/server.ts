@@ -46,6 +46,8 @@ export const Roles: RoleDef[] = [
   { id: 'role_guest_speaker', name: 'Guest Speaker', color: '#8A2BE2', hoist: false, mentionable: false, position: 67, permissions: ['VIEW_CHANNEL', 'SEND_MESSAGES', 'READ_MESSAGE_HISTORY', 'CONNECT', 'SPEAK', 'REQUEST_TO_SPEAK'] },
   { id: 'role_verified_streamer', name: 'Verified Streamer', color: '#00FFFF', hoist: false, mentionable: false, position: 66, permissions: ['VIEW_CHANNEL', 'SEND_MESSAGES', 'READ_MESSAGE_HISTORY', 'CONNECT', 'SPEAK', 'STREAM', 'USE_VAD'] },
   { id: 'role_live_alerts', name: 'Live Alerts', color: '#FF00FF', hoist: false, mentionable: true, position: 65, permissions: ['VIEW_CHANNEL', 'READ_MESSAGE_HISTORY'] },
+  // Self-assignable: anyone can take it and go live in a voice channel. Verified Streamer stays the vetted badge.
+  { id: 'role_streamer', name: 'Streamer', color: '#8A2BE2', hoist: false, mentionable: true, position: 64, permissions: ['VIEW_CHANNEL', 'SEND_MESSAGES', 'READ_MESSAGE_HISTORY', 'CONNECT', 'SPEAK', 'STREAM', 'USE_VAD'] },
   // --- Newsroom ---
   { id: 'role_news_editor', name: 'News Editor', color: '#00FFFF', hoist: false, mentionable: false, position: 60, permissions: ['VIEW_CHANNEL', 'SEND_MESSAGES', 'READ_MESSAGE_HISTORY', 'CONNECT', 'SPEAK'] },
   { id: 'role_news_approver', name: 'News Approver', color: '#00FFFF', hoist: false, mentionable: false, position: 59, permissions: ['VIEW_CHANNEL', 'SEND_MESSAGES', 'READ_MESSAGE_HISTORY', 'MANAGE_MESSAGES', 'CONNECT', 'SPEAK'] },

@@ -27,6 +27,7 @@ import {
 } from '../services/news-center.js'
 import type { NewsCategory, Language, ConfirmationStatus } from '@prisma/client'
 import { postNewsReview, buildNewsPublishEmbed } from '../services/news-announcements.js'
+import { resolveChannel, hasAnyConfigRole } from '../lib/resolve.js'
 import { logger } from '../lib/logger.js'
 
 /** Roles allowed to submit news. */
@@ -203,11 +204,7 @@ export async function execute(
    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
 
 function hasAnyRole(member: GuildMember, roleIds: string[]): boolean {
-  return roleIds.some((id) => member.roles.cache.has(id))
-}
-
-function findChannelByName(cache: any, name: string): any {
-  return [...cache.values()].find((c: any) => c.name === name)
+  return hasAnyConfigRole(member.guild, member, roleIds)
 }
 
 function findRoleByName(cache: any, name: string): Role | undefined {
@@ -362,7 +359,7 @@ async function handleApprove(
     const article = await approveNews(submissionId, interaction.user.id, note)
 
     // Notify in #news-review
-    const reviewChannel = findChannelByName(guild.channels.cache, '📰・news-review')
+    const reviewChannel = resolveChannel(guild, 'ch_news_review')
     if (reviewChannel && reviewChannel.isTextBased?.()) {
       const submission = await getNewsSubmission(submissionId)
       if (submission) {
@@ -449,7 +446,7 @@ async function handlePublish(
       return
     }
 
-    const newsChannel = findChannelByName(guild.channels.cache, '📰・gta-news')
+    const newsChannel = resolveChannel(guild, 'ch_gta_news')
     if (!newsChannel || !newsChannel.isTextBased?.()) {
       await interaction.editReply({ content: 'Salon #gta-news introuvable / #gta-news channel not found.' })
       return
@@ -722,13 +719,9 @@ export async function handleNewsSubmitModal(
     const submission = await submitNews(interaction.guildId!, interaction.user.id, data)
 
     // Notify staff in #news-review
-    const guild = interaction.guild as {
-      channels: { cache: any }
-      roles: { cache: any }
-    }
-    const reviewChannel = guild.channels.cache.find((c: any) => c.name === '📰・news-review')
+    const reviewChannel = resolveChannel(interaction.guild!, 'ch_news_review')
     if (reviewChannel && reviewChannel.isTextBased?.()) {
-      const staffRole = guild.roles.cache.find((r: any) => r.name === 'News Approver')
+      const staffRole = findRoleByName(interaction.guild!.roles.cache, 'News Approver')
       await postNewsReview(reviewChannel as TextChannel | NewsChannel, {
         id: submission.id,
         title: submission.title,
